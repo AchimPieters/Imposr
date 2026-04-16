@@ -1,6 +1,7 @@
 #include "aimp/ImpositionPlan.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <sstream>
 #include <vector>
 
@@ -16,6 +17,56 @@ bool IsRectOutsideSheet(const Rect& rect, const SheetSize& sheet) {
     return rect.x < 0.0 || rect.y < 0.0 ||
            rect.x + rect.width > sheet.widthPoints ||
            rect.y + rect.height > sheet.heightPoints;
+}
+
+struct PlacementGeometry {
+    Rect rect;
+    double rotationDegrees {0.0};
+    double scale {1.0};
+};
+
+PlacementGeometry BuildPlacementGeometry(const Rect& slotRect, const BuildOptions& options) {
+    PlacementGeometry geometry {};
+    geometry.rect = slotRect;
+
+    if (!options.scaleToFit ||
+        options.sourcePageWidthPoints <= 0.0 ||
+        options.sourcePageHeightPoints <= 0.0 ||
+        slotRect.width <= 0.0 ||
+        slotRect.height <= 0.0) {
+        return geometry;
+    }
+
+    const auto computeContainScale = [&](double sourceWidth, double sourceHeight) -> double {
+        const double sx = slotRect.width / sourceWidth;
+        const double sy = slotRect.height / sourceHeight;
+        return std::min(sx, sy);
+    };
+
+    const double normalScale = computeContainScale(options.sourcePageWidthPoints, options.sourcePageHeightPoints);
+    const double rotatedScale = computeContainScale(options.sourcePageHeightPoints, options.sourcePageWidthPoints);
+
+    bool useRotated = false;
+    if (options.autoRotateToFit && rotatedScale > normalScale) {
+        useRotated = true;
+    }
+
+    geometry.rotationDegrees = useRotated ? 90.0 : 0.0;
+    geometry.scale = useRotated ? rotatedScale : normalScale;
+
+    const double baseWidth = useRotated ? options.sourcePageHeightPoints : options.sourcePageWidthPoints;
+    const double baseHeight = useRotated ? options.sourcePageWidthPoints : options.sourcePageHeightPoints;
+    const double fittedWidth = baseWidth * geometry.scale;
+    const double fittedHeight = baseHeight * geometry.scale;
+
+    geometry.rect = Rect {
+        slotRect.x + (slotRect.width - fittedWidth) / 2.0,
+        slotRect.y + (slotRect.height - fittedHeight) / 2.0,
+        fittedWidth,
+        fittedHeight
+    };
+
+    return geometry;
 }
 
 std::string EscapeJson(const std::string& input) {
@@ -67,6 +118,20 @@ std::vector<std::uint32_t> BuildSourcePages(std::uint32_t pageCount, const Build
     return pages;
 }
 
+std::uint32_t NormalizeSignatureSize(std::uint32_t signatureSize) {
+    if (signatureSize == 0) {
+        return 0;
+    }
+    if (signatureSize < 4u) {
+        return 4u;
+    }
+    const std::uint32_t remainder = signatureSize % 4u;
+    if (remainder == 0u) {
+        return signatureSize;
+    }
+    return signatureSize + (4u - remainder);
+}
+
 std::string EscapeXml(const std::string& input) {
     std::string out;
     out.reserve(input.size());
@@ -115,14 +180,16 @@ ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
-        placement.targetRect = Rect {
+        const Rect slotRect {
             slotIndex == 0 ? 0.0 : halfWidth,
             0.0,
             halfWidth,
             fullHeight
         };
-        placement.rotationDegrees = 0.0;
-        placement.scale = 1.0;
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
 
         plan.placements.push_back(placement);
 
@@ -173,12 +240,16 @@ ImpositionPlan NUpPlanner::Build(const std::string& sourceDocumentId,
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
-        placement.targetRect = Rect {
+        const Rect slotRect {
             slotWidth * static_cast<double>(col),
             slotHeight * static_cast<double>(row),
             slotWidth,
             slotHeight
         };
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
 
         plan.placements.push_back(placement);
     }
@@ -204,17 +275,14 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
         return plan;
     }
 
-    const std::uint32_t padded = static_cast<std::uint32_t>(((sourcePages.size() + 3u) / 4u) * 4u);
-    while (sourcePages.size() < padded) {
-        sourcePages.push_back(kBlankPageIndex);
-    }
-    plan.paddedPageCount = padded;
+    const std::uint32_t normalizedSignatureSize = NormalizeSignatureSize(options.bookletSignatureSize);
 
     const double halfWidth = outputSheet.widthPoints / 2.0;
     const double fullHeight = outputSheet.heightPoints;
 
-    auto appendPlacement = [&](std::uint32_t sheetIndex, std::uint32_t slotIndex, std::uint32_t sequenceIndex) {
-        const std::uint32_t sourcePageIndex = sourcePages[sequenceIndex];
+    auto appendPlacement = [&](std::uint32_t sheetIndex,
+                               std::uint32_t slotIndex,
+                               std::uint32_t sourcePageIndex) {
 
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
@@ -224,27 +292,57 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
-        placement.targetRect = Rect {
+        const Rect slotRect {
             slotIndex == 0 ? 0.0 : halfWidth,
             0.0,
             halfWidth,
             fullHeight
         };
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
         plan.placements.push_back(placement);
     };
 
-    const std::uint32_t sheetCount = padded / 4u;
+    std::size_t sourcePos = 0;
+    std::uint32_t sheetIndexOffset = 0;
+    while (sourcePos < sourcePages.size()) {
+        std::vector<std::uint32_t> signaturePages;
+        std::uint32_t signaturePaddedPageCount = 0;
 
-    for (std::uint32_t sheet = 0; sheet < sheetCount; ++sheet) {
-        const std::uint32_t frontLeft = padded - 1u - (2u * sheet);
-        const std::uint32_t frontRight = 2u * sheet;
-        const std::uint32_t backLeft = 2u * sheet + 1u;
-        const std::uint32_t backRight = padded - 2u - (2u * sheet);
+        if (normalizedSignatureSize == 0) {
+            signaturePages.assign(sourcePages.begin() + static_cast<std::ptrdiff_t>(sourcePos), sourcePages.end());
+            signaturePaddedPageCount = static_cast<std::uint32_t>(((signaturePages.size() + 3u) / 4u) * 4u);
+            sourcePos = sourcePages.size();
+        } else {
+            const std::size_t signatureSourceCount = std::min(
+                static_cast<std::size_t>(normalizedSignatureSize),
+                sourcePages.size() - sourcePos);
+            signaturePages.assign(sourcePages.begin() + static_cast<std::ptrdiff_t>(sourcePos),
+                                  sourcePages.begin() + static_cast<std::ptrdiff_t>(sourcePos + signatureSourceCount));
+            signaturePaddedPageCount = normalizedSignatureSize;
+            sourcePos += signatureSourceCount;
+        }
 
-        appendPlacement(sheet * 2u, 0u, frontLeft);
-        appendPlacement(sheet * 2u, 1u, frontRight);
-        appendPlacement(sheet * 2u + 1u, 0u, backLeft);
-        appendPlacement(sheet * 2u + 1u, 1u, backRight);
+        while (signaturePages.size() < signaturePaddedPageCount) {
+            signaturePages.push_back(kBlankPageIndex);
+        }
+        plan.paddedPageCount += signaturePaddedPageCount;
+
+        const std::uint32_t signatureSheetCount = signaturePaddedPageCount / 4u;
+        for (std::uint32_t signatureSheet = 0; signatureSheet < signatureSheetCount; ++signatureSheet) {
+            const std::uint32_t frontLeft = signaturePaddedPageCount - 1u - (2u * signatureSheet);
+            const std::uint32_t frontRight = 2u * signatureSheet;
+            const std::uint32_t backLeft = 2u * signatureSheet + 1u;
+            const std::uint32_t backRight = signaturePaddedPageCount - 2u - (2u * signatureSheet);
+
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u, 0u, signaturePages[frontLeft]);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u, 1u, signaturePages[frontRight]);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u + 1u, 0u, signaturePages[backLeft]);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u + 1u, 1u, signaturePages[backRight]);
+        }
+        sheetIndexOffset += signatureSheetCount * 2u;
     }
 
     return plan;
@@ -294,7 +392,10 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                 } else {
                     placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
                 }
-                placement.targetRect = target;
+                const auto geometry = BuildPlacementGeometry(target, options);
+                placement.targetRect = geometry.rect;
+                placement.rotationDegrees = geometry.rotationDegrees;
+                placement.scale = geometry.scale;
                 plan.placements.push_back(placement);
                 anyPlacementOnSheet = true;
                 ++sourcePagePos;

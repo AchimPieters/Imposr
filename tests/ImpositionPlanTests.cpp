@@ -38,6 +38,28 @@ int main() {
     }
 
     {
+        aimp::BuildOptions options {};
+        options.scaleToFit = true;
+        options.autoRotateToFit = true;
+        options.sourcePageWidthPoints = 800.0;
+        options.sourcePageHeightPoints = 400.0;
+        const auto plan = aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options);
+        if (plan.placements.size() != 1) {
+            return Fail("TwoUp fit test should create one placement.");
+        }
+        const auto& p = plan.placements.front();
+        if (p.rotationDegrees != 90.0) {
+            return Fail("TwoUp fit should rotate to maximize slot usage when enabled.");
+        }
+        if (p.scale <= 0.0 || p.targetRect.height != 600.0) {
+            return Fail("TwoUp fit should compute scaled, centered target rect.");
+        }
+        if (p.targetRect.y != 100.0) {
+            return Fail("TwoUp fit should center content in slot.");
+        }
+    }
+
+    {
         const auto plan = aimp::BookletPlanner::Build("doc", 6, {1000.0, 700.0});
         if (plan.paddedPageCount != 8) {
             return Fail("Booklet should pad to multiples of 4.");
@@ -47,6 +69,21 @@ int main() {
         }
         if (plan.placements.front().sourcePage.pageIndex != aimp::kBlankPageIndex) {
             return Fail("Booklet front-left slot should be blank for 6-page signature.");
+        }
+    }
+
+    {
+        aimp::BuildOptions options {};
+        options.bookletSignatureSize = 8;
+        const auto plan = aimp::BookletPlanner::Build("doc", 10, {1000.0, 700.0}, options);
+        if (plan.paddedPageCount != 16) {
+            return Fail("Booklet signature sizing should pad each signature to configured size.");
+        }
+        if (plan.placements.size() != 16) {
+            return Fail("Booklet signature sizing should keep deterministic blank placements.");
+        }
+        if (plan.placements[8].sourcePage.pageIndex != aimp::kBlankPageIndex) {
+            return Fail("Second signature front-left should be blank when only 2 pages remain.");
         }
     }
 
@@ -204,6 +241,11 @@ int main() {
         preset.buildOptions.reverseOrder = true;
         preset.buildOptions.filter = aimp::PageFilter::OddOnly;
         preset.buildOptions.padToMultiple = 4;
+        preset.buildOptions.bookletSignatureSize = 16;
+        preset.buildOptions.scaleToFit = true;
+        preset.buildOptions.autoRotateToFit = true;
+        preset.buildOptions.sourcePageWidthPoints = 612.0;
+        preset.buildOptions.sourcePageHeightPoints = 792.0;
         preset.pdfOptions.headerText = "Preset Header";
         preset.pdfOptions.footerText = "Preset Footer";
         preset.pdfOptions.includeSheetNumber = false;
@@ -228,11 +270,36 @@ int main() {
         if (loaded.buildOptions.filter != aimp::PageFilter::OddOnly || !loaded.buildOptions.reverseOrder) {
             return Fail("Loaded preset build options mismatch.");
         }
+        if (loaded.buildOptions.bookletSignatureSize != 16) {
+            return Fail("Loaded preset booklet signature size mismatch.");
+        }
+        if (!loaded.buildOptions.scaleToFit || !loaded.buildOptions.autoRotateToFit) {
+            return Fail("Loaded preset fit options mismatch.");
+        }
+        if (loaded.buildOptions.sourcePageWidthPoints != 612.0 || loaded.buildOptions.sourcePageHeightPoints != 792.0) {
+            return Fail("Loaded preset source page dimensions mismatch.");
+        }
         if (loaded.pdfOptions.headerText != "Preset Header" || loaded.pdfOptions.includeSheetNumber) {
             return Fail("Loaded preset PDF options mismatch.");
         }
         if (!loaded.pdfOptions.includeBates || loaded.pdfOptions.batesPrefix != "PR-" || loaded.pdfOptions.batesStart != 100) {
             return Fail("Loaded preset Bates options mismatch.");
+        }
+    }
+
+    {
+        const std::string invalidPresetPath = "/tmp/aimp_invalid_preset.txt";
+        {
+            std::ofstream out(invalidPresetPath);
+            out << "sheetWidth=abc\n"; // invalid
+        }
+        aimp::PlannerPreset preset {};
+        std::string error;
+        if (aimp::LoadPreset(invalidPresetPath, preset, error)) {
+            return Fail("LoadPreset should fail on invalid preset content.");
+        }
+        if (error.empty()) {
+            return Fail("LoadPreset should report an explicit error for invalid presets.");
         }
     }
 

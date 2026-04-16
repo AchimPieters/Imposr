@@ -131,7 +131,13 @@ ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData) {
         const aimp::SheetSize outputSheet {1190.55, 841.89};
         const auto plan = aimp::TwoUpPlanner::Build("active-document", static_cast<std::uint32_t>(pageCount), outputSheet);
 
-        const auto reportPath = (std::filesystem::temp_directory_path() / "acrobat-imposition-two-up-report.pdf").string();
+        std::error_code fsError;
+        const auto tempDir = std::filesystem::temp_directory_path(fsError);
+        if (fsError) {
+            ShowInfoDialog("Kan temp map niet bepalen voor report PDF.");
+            E_RETURN_VOID;
+        }
+        const auto reportPath = (tempDir / "acrobat-imposition-two-up-report.pdf").string();
         std::string error;
         if (!aimp::ComposePlanPdf(plan, reportPath, error)) {
             ShowInfoDialog("Kon geen report PDF maken: " + error);

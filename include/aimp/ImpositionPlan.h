@@ -74,6 +74,11 @@ struct BuildOptions {
     bool reverseOrder {false};
     PageFilter filter {PageFilter::All};
     std::uint32_t padToMultiple {0};
+    std::uint32_t bookletSignatureSize {0};
+    bool scaleToFit {false};
+    bool autoRotateToFit {false};
+    double sourcePageWidthPoints {0.0};
+    double sourcePageHeightPoints {0.0};
 };
 
 class TwoUpPlanner {

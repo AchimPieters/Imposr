@@ -54,6 +54,17 @@ PageFilter StringToFilter(const std::string& value) {
     return PageFilter::All;
 }
 
+bool RequireKey(const std::unordered_map<std::string, std::string>& values,
+                const std::string& key,
+                std::string& outValue) {
+    const auto it = values.find(key);
+    if (it == values.end()) {
+        return false;
+    }
+    outValue = it->second;
+    return true;
+}
+
 } // namespace
 
 bool SavePreset(const PlannerPreset& preset, const std::string& path, std::string& errorMessage) {
@@ -76,6 +87,11 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "reverse=" << (preset.buildOptions.reverseOrder ? 1 : 0) << '\n';
     out << "filter=" << FilterToString(preset.buildOptions.filter) << '\n';
     out << "padMultiple=" << preset.buildOptions.padToMultiple << '\n';
+    out << "bookletSignatureSize=" << preset.buildOptions.bookletSignatureSize << '\n';
+    out << "scaleToFit=" << (preset.buildOptions.scaleToFit ? 1 : 0) << '\n';
+    out << "autoRotateToFit=" << (preset.buildOptions.autoRotateToFit ? 1 : 0) << '\n';
+    out << "sourcePageWidth=" << preset.buildOptions.sourcePageWidthPoints << '\n';
+    out << "sourcePageHeight=" << preset.buildOptions.sourcePageHeightPoints << '\n';
     out << "pdfSheetNumber=" << (preset.pdfOptions.includeSheetNumber ? 1 : 0) << '\n';
     out << "pdfHeader=" << preset.pdfOptions.headerText << '\n';
     out << "pdfFooter=" << preset.pdfOptions.footerText << '\n';
@@ -107,25 +123,57 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         values[line.substr(0, pos)] = line.substr(pos + 1);
     }
 
-    ParseDouble(values["sheetWidth"], preset.sheetSize.widthPoints);
-    ParseDouble(values["sheetHeight"], preset.sheetSize.heightPoints);
-    ParseUInt(values["columns"], preset.columns);
-    ParseUInt(values["rows"], preset.rows);
-    ParseUInt(values["repeatX"], preset.repeatX);
-    ParseUInt(values["repeatY"], preset.repeatY);
-    ParseDouble(values["stepX"], preset.stepX);
-    ParseDouble(values["stepY"], preset.stepY);
-    ParseDouble(values["slotWidth"], preset.slotWidth);
-    ParseDouble(values["slotHeight"], preset.slotHeight);
-    ParseUInt(values["padMultiple"], preset.buildOptions.padToMultiple);
-    preset.buildOptions.filter = StringToFilter(values["filter"]);
-    ParseBool(values["reverse"], preset.buildOptions.reverseOrder);
-    ParseBool(values["pdfSheetNumber"], preset.pdfOptions.includeSheetNumber);
-    preset.pdfOptions.headerText = values["pdfHeader"];
-    preset.pdfOptions.footerText = values["pdfFooter"];
-    ParseBool(values["pdfIncludeBates"], preset.pdfOptions.includeBates);
-    preset.pdfOptions.batesPrefix = values["pdfBatesPrefix"];
-    ParseUInt(values["pdfBatesStart"], preset.pdfOptions.batesStart);
+    std::string raw;
+    auto fail = [&](const std::string& key) {
+        errorMessage = "Missing or invalid preset key: " + key;
+        return false;
+    };
+
+    if (!RequireKey(values, "sheetWidth", raw) || !ParseDouble(raw, preset.sheetSize.widthPoints)) return fail("sheetWidth");
+    if (!RequireKey(values, "sheetHeight", raw) || !ParseDouble(raw, preset.sheetSize.heightPoints)) return fail("sheetHeight");
+    if (!RequireKey(values, "columns", raw) || !ParseUInt(raw, preset.columns)) return fail("columns");
+    if (!RequireKey(values, "rows", raw) || !ParseUInt(raw, preset.rows)) return fail("rows");
+    if (!RequireKey(values, "repeatX", raw) || !ParseUInt(raw, preset.repeatX)) return fail("repeatX");
+    if (!RequireKey(values, "repeatY", raw) || !ParseUInt(raw, preset.repeatY)) return fail("repeatY");
+    if (!RequireKey(values, "stepX", raw) || !ParseDouble(raw, preset.stepX)) return fail("stepX");
+    if (!RequireKey(values, "stepY", raw) || !ParseDouble(raw, preset.stepY)) return fail("stepY");
+    if (!RequireKey(values, "slotWidth", raw) || !ParseDouble(raw, preset.slotWidth)) return fail("slotWidth");
+    if (!RequireKey(values, "slotHeight", raw) || !ParseDouble(raw, preset.slotHeight)) return fail("slotHeight");
+    if (!RequireKey(values, "padMultiple", raw) || !ParseUInt(raw, preset.buildOptions.padToMultiple)) return fail("padMultiple");
+    if (RequireKey(values, "bookletSignatureSize", raw)) {
+        if (!ParseUInt(raw, preset.buildOptions.bookletSignatureSize)) return fail("bookletSignatureSize");
+    } else {
+        preset.buildOptions.bookletSignatureSize = 0;
+    }
+    if (RequireKey(values, "scaleToFit", raw)) {
+        if (!ParseBool(raw, preset.buildOptions.scaleToFit)) return fail("scaleToFit");
+    } else {
+        preset.buildOptions.scaleToFit = false;
+    }
+    if (RequireKey(values, "autoRotateToFit", raw)) {
+        if (!ParseBool(raw, preset.buildOptions.autoRotateToFit)) return fail("autoRotateToFit");
+    } else {
+        preset.buildOptions.autoRotateToFit = false;
+    }
+    if (RequireKey(values, "sourcePageWidth", raw)) {
+        if (!ParseDouble(raw, preset.buildOptions.sourcePageWidthPoints)) return fail("sourcePageWidth");
+    } else {
+        preset.buildOptions.sourcePageWidthPoints = 0.0;
+    }
+    if (RequireKey(values, "sourcePageHeight", raw)) {
+        if (!ParseDouble(raw, preset.buildOptions.sourcePageHeightPoints)) return fail("sourcePageHeight");
+    } else {
+        preset.buildOptions.sourcePageHeightPoints = 0.0;
+    }
+    if (!RequireKey(values, "filter", raw)) return fail("filter");
+    preset.buildOptions.filter = StringToFilter(raw);
+    if (!RequireKey(values, "reverse", raw) || !ParseBool(raw, preset.buildOptions.reverseOrder)) return fail("reverse");
+    if (!RequireKey(values, "pdfSheetNumber", raw) || !ParseBool(raw, preset.pdfOptions.includeSheetNumber)) return fail("pdfSheetNumber");
+    if (!RequireKey(values, "pdfHeader", preset.pdfOptions.headerText)) return fail("pdfHeader");
+    if (!RequireKey(values, "pdfFooter", preset.pdfOptions.footerText)) return fail("pdfFooter");
+    if (!RequireKey(values, "pdfIncludeBates", raw) || !ParseBool(raw, preset.pdfOptions.includeBates)) return fail("pdfIncludeBates");
+    if (!RequireKey(values, "pdfBatesPrefix", preset.pdfOptions.batesPrefix)) return fail("pdfBatesPrefix");
+    if (!RequireKey(values, "pdfBatesStart", raw) || !ParseUInt(raw, preset.pdfOptions.batesStart)) return fail("pdfBatesStart");
 
     return true;
 }
