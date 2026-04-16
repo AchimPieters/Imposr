@@ -2,6 +2,7 @@
 
 ## v0.1
 - plug-in loads in Acrobat Pro
+- builds on Windows 11 and macOS (64-bit)
 - menu appears
 - 2-up planning model
 - active document page counting
@@ -10,7 +11,7 @@
 - create output PDF from active document
 - simple 2-up composition
 - page padding to even count
-- rotate / scale / center
+- rotate / scale / center metadata in planner (Acrobat composition hookup pending)
 
 ## v0.3
 - booklet mode
