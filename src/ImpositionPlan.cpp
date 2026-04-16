@@ -19,6 +19,56 @@ bool IsRectOutsideSheet(const Rect& rect, const SheetSize& sheet) {
            rect.y + rect.height > sheet.heightPoints;
 }
 
+struct PlacementGeometry {
+    Rect rect;
+    double rotationDegrees {0.0};
+    double scale {1.0};
+};
+
+PlacementGeometry BuildPlacementGeometry(const Rect& slotRect, const BuildOptions& options) {
+    PlacementGeometry geometry {};
+    geometry.rect = slotRect;
+
+    if (!options.scaleToFit ||
+        options.sourcePageWidthPoints <= 0.0 ||
+        options.sourcePageHeightPoints <= 0.0 ||
+        slotRect.width <= 0.0 ||
+        slotRect.height <= 0.0) {
+        return geometry;
+    }
+
+    const auto computeContainScale = [&](double sourceWidth, double sourceHeight) -> double {
+        const double sx = slotRect.width / sourceWidth;
+        const double sy = slotRect.height / sourceHeight;
+        return std::min(sx, sy);
+    };
+
+    const double normalScale = computeContainScale(options.sourcePageWidthPoints, options.sourcePageHeightPoints);
+    const double rotatedScale = computeContainScale(options.sourcePageHeightPoints, options.sourcePageWidthPoints);
+
+    bool useRotated = false;
+    if (options.autoRotateToFit && rotatedScale > normalScale) {
+        useRotated = true;
+    }
+
+    geometry.rotationDegrees = useRotated ? 90.0 : 0.0;
+    geometry.scale = useRotated ? rotatedScale : normalScale;
+
+    const double baseWidth = useRotated ? options.sourcePageHeightPoints : options.sourcePageWidthPoints;
+    const double baseHeight = useRotated ? options.sourcePageWidthPoints : options.sourcePageHeightPoints;
+    const double fittedWidth = baseWidth * geometry.scale;
+    const double fittedHeight = baseHeight * geometry.scale;
+
+    geometry.rect = Rect {
+        slotRect.x + (slotRect.width - fittedWidth) / 2.0,
+        slotRect.y + (slotRect.height - fittedHeight) / 2.0,
+        fittedWidth,
+        fittedHeight
+    };
+
+    return geometry;
+}
+
 std::string EscapeJson(const std::string& input) {
     std::string out;
     out.reserve(input.size());
@@ -130,14 +180,16 @@ ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
-        placement.targetRect = Rect {
+        const Rect slotRect {
             slotIndex == 0 ? 0.0 : halfWidth,
             0.0,
             halfWidth,
             fullHeight
         };
-        placement.rotationDegrees = 0.0;
-        placement.scale = 1.0;
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
 
         plan.placements.push_back(placement);
 
@@ -188,12 +240,16 @@ ImpositionPlan NUpPlanner::Build(const std::string& sourceDocumentId,
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
-        placement.targetRect = Rect {
+        const Rect slotRect {
             slotWidth * static_cast<double>(col),
             slotHeight * static_cast<double>(row),
             slotWidth,
             slotHeight
         };
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
 
         plan.placements.push_back(placement);
     }
@@ -236,12 +292,16 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
-        placement.targetRect = Rect {
+        const Rect slotRect {
             slotIndex == 0 ? 0.0 : halfWidth,
             0.0,
             halfWidth,
             fullHeight
         };
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
         plan.placements.push_back(placement);
     };
 
@@ -332,7 +392,10 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                 } else {
                     placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
                 }
-                placement.targetRect = target;
+                const auto geometry = BuildPlacementGeometry(target, options);
+                placement.targetRect = geometry.rect;
+                placement.rotationDegrees = geometry.rotationDegrees;
+                placement.scale = geometry.scale;
                 plan.placements.push_back(placement);
                 anyPlacementOnSheet = true;
                 ++sourcePagePos;

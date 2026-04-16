@@ -11,7 +11,7 @@
 - create output PDF from active document
 - simple 2-up composition
 - page padding to even count
-- rotate / scale / center
+- rotate / scale / center metadata in planner (Acrobat composition hookup pending)
 
 ## v0.3
 - booklet mode

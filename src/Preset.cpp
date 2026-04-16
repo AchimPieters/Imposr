@@ -88,6 +88,10 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "filter=" << FilterToString(preset.buildOptions.filter) << '\n';
     out << "padMultiple=" << preset.buildOptions.padToMultiple << '\n';
     out << "bookletSignatureSize=" << preset.buildOptions.bookletSignatureSize << '\n';
+    out << "scaleToFit=" << (preset.buildOptions.scaleToFit ? 1 : 0) << '\n';
+    out << "autoRotateToFit=" << (preset.buildOptions.autoRotateToFit ? 1 : 0) << '\n';
+    out << "sourcePageWidth=" << preset.buildOptions.sourcePageWidthPoints << '\n';
+    out << "sourcePageHeight=" << preset.buildOptions.sourcePageHeightPoints << '\n';
     out << "pdfSheetNumber=" << (preset.pdfOptions.includeSheetNumber ? 1 : 0) << '\n';
     out << "pdfHeader=" << preset.pdfOptions.headerText << '\n';
     out << "pdfFooter=" << preset.pdfOptions.footerText << '\n';
@@ -140,6 +144,26 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         if (!ParseUInt(raw, preset.buildOptions.bookletSignatureSize)) return fail("bookletSignatureSize");
     } else {
         preset.buildOptions.bookletSignatureSize = 0;
+    }
+    if (RequireKey(values, "scaleToFit", raw)) {
+        if (!ParseBool(raw, preset.buildOptions.scaleToFit)) return fail("scaleToFit");
+    } else {
+        preset.buildOptions.scaleToFit = false;
+    }
+    if (RequireKey(values, "autoRotateToFit", raw)) {
+        if (!ParseBool(raw, preset.buildOptions.autoRotateToFit)) return fail("autoRotateToFit");
+    } else {
+        preset.buildOptions.autoRotateToFit = false;
+    }
+    if (RequireKey(values, "sourcePageWidth", raw)) {
+        if (!ParseDouble(raw, preset.buildOptions.sourcePageWidthPoints)) return fail("sourcePageWidth");
+    } else {
+        preset.buildOptions.sourcePageWidthPoints = 0.0;
+    }
+    if (RequireKey(values, "sourcePageHeight", raw)) {
+        if (!ParseDouble(raw, preset.buildOptions.sourcePageHeightPoints)) return fail("sourcePageHeight");
+    } else {
+        preset.buildOptions.sourcePageHeightPoints = 0.0;
     }
     if (!RequireKey(values, "filter", raw)) return fail("filter");
     preset.buildOptions.filter = StringToFilter(raw);
