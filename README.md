@@ -114,6 +114,7 @@ ctest --test-dir build --output-on-failure
 CI note:
 
 - GitHub Actions workflow `.github/workflows/planner-ci.yml` runs planner-only configure/build/test on Ubuntu, macOS, and Windows with `AIMP_BUILD_PLUGIN=OFF`.
+- Strict warnings are managed in CMake via `AIMP_ENABLE_STRICT_WARNINGS=ON` (default), with compiler-appropriate flags (`/W4` on MSVC, `-Wall -Wextra -Wpedantic` elsewhere).
 
 CLI examples:
 

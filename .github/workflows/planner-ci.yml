@@ -16,13 +16,10 @@ jobs:
         include:
           - os: ubuntu-latest
             build_type: Release
-            extra_cxx_flags: -Wall -Wextra -Wpedantic
           - os: macos-latest
             build_type: Release
-            extra_cxx_flags: -Wall -Wextra -Wpedantic
           - os: windows-latest
             build_type: Release
-            extra_cxx_flags: /W4
 
     steps:
       - name: Checkout
@@ -34,8 +31,8 @@ jobs:
           -DAIMP_BUILD_PLUGIN=OFF
           -DAIMP_BUILD_TESTS=ON
           -DAIMP_BUILD_CLI=ON
+          -DAIMP_ENABLE_STRICT_WARNINGS=ON
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DCMAKE_CXX_FLAGS="${{ matrix.extra_cxx_flags }}"
 
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }}
