@@ -1,6 +1,8 @@
 #include "aimp/ImpositionPlan.h"
 
+#include <algorithm>
 #include <sstream>
+#include <vector>
 
 namespace aimp {
 
@@ -33,20 +35,54 @@ std::string EscapeJson(const std::string& input) {
     return out;
 }
 
+std::vector<std::uint32_t> BuildSourcePages(std::uint32_t pageCount, const BuildOptions& options) {
+    std::vector<std::uint32_t> pages;
+    pages.reserve(pageCount);
+
+    for (std::uint32_t idx = 0; idx < pageCount; ++idx) {
+        const std::uint32_t humanPage = idx + 1;
+        if (options.filter == PageFilter::EvenOnly && (humanPage % 2u) != 0u) {
+            continue;
+        }
+        if (options.filter == PageFilter::OddOnly && (humanPage % 2u) == 0u) {
+            continue;
+        }
+        pages.push_back(idx);
+    }
+
+    if (options.reverseOrder) {
+        std::reverse(pages.begin(), pages.end());
+    }
+
+    if (options.padToMultiple > 0) {
+        const std::size_t remainder = pages.size() % options.padToMultiple;
+        if (remainder != 0) {
+            const std::size_t padNeeded = options.padToMultiple - remainder;
+            for (std::size_t i = 0; i < padNeeded; ++i) {
+                pages.push_back(UINT32_MAX);
+            }
+        }
+    }
+
+    return pages;
+}
+
 }
 
 ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
                                    std::uint32_t pageCount,
-                                   const SheetSize& outputSheet) {
+                                   const SheetSize& outputSheet,
+                                   const BuildOptions& options) {
     ImpositionPlan plan {};
     plan.mode = LayoutMode::TwoUp;
     plan.outputSheet = outputSheet;
     plan.sourcePageCount = pageCount;
-    plan.paddedPageCount = pageCount;
 
     if (pageCount == 0 || IsInvalidSheet(outputSheet)) {
         return plan;
     }
+    const auto sourcePages = BuildSourcePages(pageCount, options);
+    plan.paddedPageCount = static_cast<std::uint32_t>(sourcePages.size());
 
     const double halfWidth = outputSheet.widthPoints / 2.0;
     const double fullHeight = outputSheet.heightPoints;
@@ -54,11 +90,15 @@ ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
     std::uint32_t sheetIndex = 0;
     std::uint32_t slotIndex = 0;
 
-    for (std::uint32_t page = 0; page < pageCount; ++page) {
+    for (std::uint32_t sourcePageIndex : sourcePages) {
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
         placement.slotIndex = slotIndex;
-        placement.sourcePage = PageRef {sourceDocumentId, page};
+        if (sourcePageIndex == UINT32_MAX) {
+            placement.sourcePage = PageRef {"", UINT32_MAX};
+        } else {
+            placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
+        }
         placement.targetRect = Rect {
             slotIndex == 0 ? 0.0 : halfWidth,
             0.0,
@@ -84,12 +124,12 @@ ImpositionPlan NUpPlanner::Build(const std::string& sourceDocumentId,
                                  std::uint32_t pageCount,
                                  const SheetSize& outputSheet,
                                  std::uint32_t columns,
-                                 std::uint32_t rows) {
+                                 std::uint32_t rows,
+                                 const BuildOptions& options) {
     ImpositionPlan plan {};
     plan.mode = LayoutMode::NUp;
     plan.outputSheet = outputSheet;
     plan.sourcePageCount = pageCount;
-    plan.paddedPageCount = pageCount;
 
     if (pageCount == 0 || IsInvalidSheet(outputSheet) || columns == 0 || rows == 0) {
         return plan;
@@ -99,16 +139,24 @@ ImpositionPlan NUpPlanner::Build(const std::string& sourceDocumentId,
     const double slotHeight = outputSheet.heightPoints / static_cast<double>(rows);
     const std::uint32_t slotsPerSheet = columns * rows;
 
-    for (std::uint32_t page = 0; page < pageCount; ++page) {
-        const std::uint32_t sheetIndex = page / slotsPerSheet;
-        const std::uint32_t slotIndex = page % slotsPerSheet;
+    const auto sourcePages = BuildSourcePages(pageCount, options);
+    plan.paddedPageCount = static_cast<std::uint32_t>(sourcePages.size());
+
+    for (std::uint32_t i = 0; i < sourcePages.size(); ++i) {
+        const std::uint32_t sourcePageIndex = sourcePages[i];
+        const std::uint32_t sheetIndex = i / slotsPerSheet;
+        const std::uint32_t slotIndex = i % slotsPerSheet;
         const std::uint32_t col = slotIndex % columns;
         const std::uint32_t row = slotIndex / columns;
 
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
         placement.slotIndex = slotIndex;
-        placement.sourcePage = PageRef {sourceDocumentId, page};
+        if (sourcePageIndex == UINT32_MAX) {
+            placement.sourcePage = PageRef {"", UINT32_MAX};
+        } else {
+            placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
+        }
         placement.targetRect = Rect {
             slotWidth * static_cast<double>(col),
             slotHeight * static_cast<double>(row),
@@ -124,7 +172,8 @@ ImpositionPlan NUpPlanner::Build(const std::string& sourceDocumentId,
 
 ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
                                      std::uint32_t pageCount,
-                                     const SheetSize& outputSheet) {
+                                     const SheetSize& outputSheet,
+                                     const BuildOptions& options) {
     ImpositionPlan plan {};
     plan.mode = LayoutMode::Booklet;
     plan.outputSheet = outputSheet;
@@ -134,23 +183,31 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
         return plan;
     }
 
-    const std::uint32_t padded = ((pageCount + 3u) / 4u) * 4u;
+    auto sourcePages = BuildSourcePages(pageCount, options);
+    if (sourcePages.empty()) {
+        return plan;
+    }
+
+    const std::uint32_t padded = static_cast<std::uint32_t>(((sourcePages.size() + 3u) / 4u) * 4u);
+    while (sourcePages.size() < padded) {
+        sourcePages.push_back(UINT32_MAX);
+    }
     plan.paddedPageCount = padded;
 
     const double halfWidth = outputSheet.widthPoints / 2.0;
     const double fullHeight = outputSheet.heightPoints;
 
-    auto appendPlacement = [&](std::uint32_t sheetIndex,
-                               std::uint32_t slotIndex,
-                               std::uint32_t pageNumber) {
-        if (pageNumber >= pageCount) {
-            return;
-        }
+    auto appendPlacement = [&](std::uint32_t sheetIndex, std::uint32_t slotIndex, std::uint32_t sequenceIndex) {
+        const std::uint32_t sourcePageIndex = sourcePages[sequenceIndex];
 
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
         placement.slotIndex = slotIndex;
-        placement.sourcePage = PageRef {sourceDocumentId, pageNumber};
+        if (sourcePageIndex == UINT32_MAX) {
+            placement.sourcePage = PageRef {"", UINT32_MAX};
+        } else {
+            placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
+        }
         placement.targetRect = Rect {
             slotIndex == 0 ? 0.0 : halfWidth,
             0.0,
@@ -180,12 +237,12 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
 ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                                            std::uint32_t pageCount,
                                            const SheetSize& outputSheet,
-                                           const StepRepeatConfig& config) {
+                                           const StepRepeatConfig& config,
+                                           const BuildOptions& options) {
     ImpositionPlan plan {};
     plan.mode = LayoutMode::StepAndRepeat;
     plan.outputSheet = outputSheet;
     plan.sourcePageCount = pageCount;
-    plan.paddedPageCount = pageCount;
 
     if (pageCount == 0 || IsInvalidSheet(outputSheet) ||
         config.repeatX == 0 || config.repeatY == 0 ||
@@ -193,11 +250,14 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
         return plan;
     }
 
-    std::uint32_t sourcePage = 0;
-    for (std::uint32_t sheetIndex = 0; sourcePage < pageCount; ++sheetIndex) {
+    const auto sourcePages = BuildSourcePages(pageCount, options);
+    plan.paddedPageCount = static_cast<std::uint32_t>(sourcePages.size());
+
+    std::size_t sourcePagePos = 0;
+    for (std::uint32_t sheetIndex = 0; sourcePagePos < sourcePages.size(); ++sheetIndex) {
         bool anyPlacementOnSheet = false;
-        for (std::uint32_t y = 0; y < config.repeatY && sourcePage < pageCount; ++y) {
-            for (std::uint32_t x = 0; x < config.repeatX && sourcePage < pageCount; ++x) {
+        for (std::uint32_t y = 0; y < config.repeatY && sourcePagePos < sourcePages.size(); ++y) {
+            for (std::uint32_t x = 0; x < config.repeatX && sourcePagePos < sourcePages.size(); ++x) {
                 Rect target {
                     config.seedRect.x + static_cast<double>(x) * config.stepXPoints,
                     config.seedRect.y + static_cast<double>(y) * config.stepYPoints,
@@ -212,11 +272,16 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                 SlotPlacement placement {};
                 placement.sheetIndex = sheetIndex;
                 placement.slotIndex = y * config.repeatX + x;
-                placement.sourcePage = PageRef {sourceDocumentId, sourcePage};
+                const std::uint32_t sourcePageIndex = sourcePages[sourcePagePos];
+                if (sourcePageIndex == UINT32_MAX) {
+                    placement.sourcePage = PageRef {"", UINT32_MAX};
+                } else {
+                    placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
+                }
                 placement.targetRect = target;
                 plan.placements.push_back(placement);
                 anyPlacementOnSheet = true;
-                ++sourcePage;
+                ++sourcePagePos;
             }
         }
         if (!anyPlacementOnSheet) {

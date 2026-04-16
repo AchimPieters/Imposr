@@ -15,6 +15,12 @@ enum class LayoutMode {
     Tile
 };
 
+enum class PageFilter {
+    All,
+    EvenOnly,
+    OddOnly
+};
+
 struct PageRef {
     std::string sourceDocumentId;
     std::uint32_t pageIndex {0};
@@ -57,11 +63,18 @@ struct StepRepeatConfig {
     Rect seedRect;
 };
 
+struct BuildOptions {
+    bool reverseOrder {false};
+    PageFilter filter {PageFilter::All};
+    std::uint32_t padToMultiple {0};
+};
+
 class TwoUpPlanner {
 public:
     static ImpositionPlan Build(const std::string& sourceDocumentId,
                                 std::uint32_t pageCount,
-                                const SheetSize& outputSheet);
+                                const SheetSize& outputSheet,
+                                const BuildOptions& options = {});
 };
 
 class NUpPlanner {
@@ -70,14 +83,16 @@ public:
                                 std::uint32_t pageCount,
                                 const SheetSize& outputSheet,
                                 std::uint32_t columns,
-                                std::uint32_t rows);
+                                std::uint32_t rows,
+                                const BuildOptions& options = {});
 };
 
 class BookletPlanner {
 public:
     static ImpositionPlan Build(const std::string& sourceDocumentId,
                                 std::uint32_t pageCount,
-                                const SheetSize& outputSheet);
+                                const SheetSize& outputSheet,
+                                const BuildOptions& options = {});
 };
 
 class StepAndRepeatPlanner {
@@ -85,7 +100,8 @@ public:
     static ImpositionPlan Build(const std::string& sourceDocumentId,
                                 std::uint32_t pageCount,
                                 const SheetSize& outputSheet,
-                                const StepRepeatConfig& config);
+                                const StepRepeatConfig& config,
+                                const BuildOptions& options = {});
 };
 
 const char* LayoutModeName(LayoutMode mode);

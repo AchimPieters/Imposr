@@ -39,11 +39,11 @@ int main() {
         if (plan.paddedPageCount != 8) {
             return Fail("Booklet should pad to multiples of 4.");
         }
-        if (plan.placements.size() != 6) {
-            return Fail("Booklet should skip blank source placements.");
+        if (plan.placements.size() != 8) {
+            return Fail("Booklet should keep padded blank slots for deterministic composition.");
         }
-        if (plan.placements.front().sourcePage.pageIndex != 0) {
-            return Fail("Booklet first source page in sparse placement should be page 1 (index 0).");
+        if (plan.placements.front().sourcePage.pageIndex != UINT32_MAX) {
+            return Fail("Booklet front-left slot should be blank for 6-page signature.");
         }
     }
 
@@ -61,6 +61,31 @@ int main() {
     }
 
     {
+        aimp::BuildOptions options {};
+        options.reverseOrder = true;
+        options.filter = aimp::PageFilter::EvenOnly;
+        const auto plan = aimp::TwoUpPlanner::Build("doc", 6, {1000.0, 700.0}, options);
+        if (plan.placements.size() != 3) {
+            return Fail("TwoUp reverse/even filter should leave 3 pages for 6-page input.");
+        }
+        if (plan.placements.front().sourcePage.pageIndex != 5) {
+            return Fail("TwoUp reverse/even filter ordering mismatch.");
+        }
+    }
+
+    {
+        aimp::BuildOptions options {};
+        options.padToMultiple = 4;
+        const auto plan = aimp::NUpPlanner::Build("doc", 6, {1200.0, 800.0}, 2, 2, options);
+        if (plan.paddedPageCount != 8) {
+            return Fail("NUp with padToMultiple=4 should pad to 8.");
+        }
+        if (plan.placements.back().sourcePage.pageIndex != UINT32_MAX) {
+            return Fail("NUp padded slots should carry blank page marker.");
+        }
+    }
+
+    {
         const aimp::StepRepeatConfig config {
             2,
             2,
@@ -74,6 +99,9 @@ int main() {
         }
         if (plan.placements.size() != 5) {
             return Fail("Step-and-repeat should place all source pages when grid has capacity.");
+        }
+        if (plan.sourcePageCount != 5 || plan.paddedPageCount != 5) {
+            return Fail("Step-and-repeat source/padded metadata mismatch.");
         }
     }
 

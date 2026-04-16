@@ -15,7 +15,8 @@ void PrintUsage() {
         << "  imposr_cli two-up --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
         << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
         << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
-        << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n";
+        << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
+        << "Common options for all modes: [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -52,6 +53,7 @@ int main(int argc, char** argv) {
     double slotWidth = 0.0;
     double slotHeight = 0.0;
     std::string outPath;
+    aimp::BuildOptions buildOptions {};
 
     for (int i = 2; i < argc; ++i) {
         const std::string key = argv[i];
@@ -118,6 +120,29 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid value for --slot-height\n";
                 return 1;
             }
+        } else if (key == "--reverse") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --reverse (expected 0 or 1)\n";
+                return 1;
+            }
+            buildOptions.reverseOrder = (raw == 1);
+        } else if (key == "--pad-multiple") {
+            if (!ParseUInt(value, buildOptions.padToMultiple)) {
+                std::cerr << "Invalid value for --pad-multiple\n";
+                return 1;
+            }
+        } else if (key == "--filter") {
+            if (value == "all") {
+                buildOptions.filter = aimp::PageFilter::All;
+            } else if (value == "even") {
+                buildOptions.filter = aimp::PageFilter::EvenOnly;
+            } else if (value == "odd") {
+                buildOptions.filter = aimp::PageFilter::OddOnly;
+            } else {
+                std::cerr << "Invalid value for --filter (all|even|odd)\n";
+                return 1;
+            }
         } else {
             std::cerr << "Unknown argument: " << key << '\n';
             return 1;
@@ -127,15 +152,15 @@ int main(int argc, char** argv) {
     const aimp::SheetSize sheet {sheetWidth, sheetHeight};
     aimp::ImpositionPlan plan {};
     if (mode == "two-up") {
-        plan = aimp::TwoUpPlanner::Build("cli-input", pages, sheet);
+        plan = aimp::TwoUpPlanner::Build("cli-input", pages, sheet, buildOptions);
     } else if (mode == "n-up") {
         if (columns == 0 || rows == 0) {
             std::cerr << "n-up mode requires --columns and --rows\n";
             return 1;
         }
-        plan = aimp::NUpPlanner::Build("cli-input", pages, sheet, columns, rows);
+        plan = aimp::NUpPlanner::Build("cli-input", pages, sheet, columns, rows, buildOptions);
     } else if (mode == "booklet") {
-        plan = aimp::BookletPlanner::Build("cli-input", pages, sheet);
+        plan = aimp::BookletPlanner::Build("cli-input", pages, sheet, buildOptions);
     } else if (mode == "step-repeat") {
         if (repeatX == 0 || repeatY == 0 || slotWidth <= 0.0 || slotHeight <= 0.0) {
             std::cerr << "step-repeat mode requires repeat/step/slot arguments\n";
@@ -148,7 +173,7 @@ int main(int argc, char** argv) {
             stepY,
             aimp::Rect {0.0, 0.0, slotWidth, slotHeight}
         };
-        plan = aimp::StepAndRepeatPlanner::Build("cli-input", pages, sheet, config);
+        plan = aimp::StepAndRepeatPlanner::Build("cli-input", pages, sheet, config, buildOptions);
     } else {
         std::cerr << "Unknown mode: " << mode << '\n';
         PrintUsage();

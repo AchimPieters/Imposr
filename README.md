@@ -115,6 +115,7 @@ CLI examples:
 ./build/imposr_cli booklet --pages 28 --sheet-width 1190.55 --sheet-height 841.89 --out booklet-plan.json
 ./build/imposr_cli n-up --pages 16 --sheet-width 1190.55 --sheet-height 841.89 --columns 2 --rows 2
 ./build/imposr_cli step-repeat --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --repeat-x 3 --repeat-y 2 --step-x 396.85 --step-y 420.94 --slot-width 396.85 --slot-height 420.94
+./build/imposr_cli two-up --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --reverse 1 --filter even --pad-multiple 4
 ```
 
 ## Repository layout
