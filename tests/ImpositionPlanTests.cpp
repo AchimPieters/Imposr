@@ -77,6 +77,27 @@ int main() {
         }
     }
 
+    {
+        const aimp::StepRepeatConfig config {
+            2,
+            2,
+            500.0,
+            350.0,
+            aimp::Rect {2000.0, 2000.0, 500.0, 350.0}
+        };
+        const auto plan = aimp::StepAndRepeatPlanner::Build("doc", 5, {1000.0, 700.0}, config);
+        if (!plan.placements.empty()) {
+            return Fail("Step-and-repeat should not produce placements when all slots are outside the sheet.");
+        }
+    }
+
+    {
+        const auto json = aimp::ToJson(aimp::TwoUpPlanner::Build("a\"b\\c", 1, {1000.0, 700.0}));
+        if (json.find("a\\\"b\\\\c") == std::string::npos) {
+            return Fail("JSON output should escape document IDs.");
+        }
+    }
+
     std::cout << "All planner checks passed.\n";
     return EXIT_SUCCESS;
 }

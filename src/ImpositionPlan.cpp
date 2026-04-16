@@ -16,6 +16,23 @@ bool IsRectOutsideSheet(const Rect& rect, const SheetSize& sheet) {
            rect.y + rect.height > sheet.heightPoints;
 }
 
+std::string EscapeJson(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+
+    for (char ch : input) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '\"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out += ch; break;
+        }
+    }
+    return out;
+}
+
 }
 
 ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
@@ -178,6 +195,7 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
 
     std::uint32_t sourcePage = 0;
     for (std::uint32_t sheetIndex = 0; sourcePage < pageCount; ++sheetIndex) {
+        bool anyPlacementOnSheet = false;
         for (std::uint32_t y = 0; y < config.repeatY && sourcePage < pageCount; ++y) {
             for (std::uint32_t x = 0; x < config.repeatX && sourcePage < pageCount; ++x) {
                 Rect target {
@@ -197,8 +215,12 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                 placement.sourcePage = PageRef {sourceDocumentId, sourcePage};
                 placement.targetRect = target;
                 plan.placements.push_back(placement);
+                anyPlacementOnSheet = true;
                 ++sourcePage;
             }
+        }
+        if (!anyPlacementOnSheet) {
+            break;
         }
     }
 
@@ -232,7 +254,7 @@ std::string ToJson(const ImpositionPlan& plan) {
         out << "    {"
             << "\"sheetIndex\": " << p.sheetIndex
             << ", \"slotIndex\": " << p.slotIndex
-            << ", \"source\": {\"documentId\": \"" << p.sourcePage.sourceDocumentId
+            << ", \"source\": {\"documentId\": \"" << EscapeJson(p.sourcePage.sourceDocumentId)
             << "\", \"pageIndex\": " << p.sourcePage.pageIndex << "}"
             << ", \"targetRect\": {\"x\": " << p.targetRect.x
             << ", \"y\": " << p.targetRect.y
