@@ -45,6 +45,8 @@ struct ImpositionPlan {
     LayoutMode mode {LayoutMode::TwoUp};
     SheetSize outputSheet;
     std::vector<SlotPlacement> placements;
+    std::uint32_t sourcePageCount {0};
+    std::uint32_t paddedPageCount {0};
 };
 
 class TwoUpPlanner {
@@ -53,5 +55,23 @@ public:
                                 std::uint32_t pageCount,
                                 const SheetSize& outputSheet);
 };
+
+class NUpPlanner {
+public:
+    static ImpositionPlan Build(const std::string& sourceDocumentId,
+                                std::uint32_t pageCount,
+                                const SheetSize& outputSheet,
+                                std::uint32_t columns,
+                                std::uint32_t rows);
+};
+
+class BookletPlanner {
+public:
+    static ImpositionPlan Build(const std::string& sourceDocumentId,
+                                std::uint32_t pageCount,
+                                const SheetSize& outputSheet);
+};
+
+std::string ToJson(const ImpositionPlan& plan);
 
 } // namespace aimp
