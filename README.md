@@ -15,6 +15,7 @@ This repository is intentionally a **solid starter** rather than a full producti
 - an Acrobat plug-in entry skeleton
 - a first menu command inside Acrobat
 - a basic imposition planning model in C++
+- cross-platform CMake setup for Windows 11 and macOS development
 - roadmap and architecture notes
 
 ## Current scope
@@ -26,6 +27,10 @@ Implemented in this starter:
 - stub command for `Plug-ins > Acrobat Imposition Plugin > 2-Up Demo`
 - core data structures for imposition jobs and slot placement
 - demo planner for 2-up layout generation
+- planner modules for 2-up, booklet, and generic N-up calculations
+- planner support for step-and-repeat layout
+- standalone planner tests that run without the Acrobat SDK
+- cross-platform CLI app (`imposr_cli`) that generates imposition plans as JSON
 
 Not yet implemented:
 
@@ -34,7 +39,6 @@ Not yet implemented:
 - creep / trim shift
 - bleed / crop marks
 - CSV variable data
-- inspector / reverse mapping
 
 ## Adobe SDK requirements
 
@@ -55,13 +59,21 @@ See Adobe’s official SDK docs:
 
 ## Expected local setup
 
-### Windows
+### Windows 11
 
 Recommended:
 
 - Visual Studio 2019 or newer
 - latest Acrobat SDK downloaded locally
 - Adobe Acrobat Pro installed locally for testing
+
+### macOS
+
+Recommended:
+
+- Xcode 15+ command line tools
+- latest Acrobat SDK downloaded locally
+- Adobe Acrobat Pro (64-bit) installed locally for testing
 
 ### Environment variables
 
@@ -86,6 +98,27 @@ cmake --build build --config Release
 ```
 
 The output should be a plug-in binary you can place in Acrobat’s plug-ins folder for local testing.
+
+If you only want to build/test the planner engine (without Acrobat SDK):
+
+```bash
+cmake -S . -B build -DAIMP_BUILD_PLUGIN=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+CLI examples:
+
+```bash
+./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89
+./build/imposr_cli booklet --pages 28 --sheet-width 1190.55 --sheet-height 841.89 --out booklet-plan.json
+./build/imposr_cli n-up --pages 16 --sheet-width 1190.55 --sheet-height 841.89 --columns 2 --rows 2
+./build/imposr_cli step-repeat --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --repeat-x 3 --repeat-y 2 --step-x 396.85 --step-y 420.94 --slot-width 396.85 --slot-height 420.94
+./build/imposr_cli two-up --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --reverse 1 --filter even --pad-multiple 4
+./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --audit-out plan-audit.xml
+./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --inspect-source-page 3
+./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --inspect-sheet 1 --inspect-slot 0
+```
 
 ## Repository layout
 
