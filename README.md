@@ -25,6 +25,7 @@ Implemented in this starter:
 - plug-in handshake callbacks (`PluginExportHFTs`, `PluginImportReplaceAndRegister`, `PluginInit`, `PluginUnload`)
 - Acrobat menu registration
 - stub command for `Plug-ins > Acrobat Imposition Plugin > 2-Up Demo`
+- report command for `Plug-ins > Acrobat Imposition Plugin > 2-Up Report PDF`
 - core data structures for imposition jobs and slot placement
 - demo planner for 2-up layout generation
 - planner modules for 2-up, booklet, and generic N-up calculations
