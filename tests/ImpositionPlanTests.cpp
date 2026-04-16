@@ -158,7 +158,11 @@ int main() {
         const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
         std::string error;
         const std::string outputPath = "/tmp/aimp_test_output.pdf";
-        if (!aimp::ComposePlanPdf(plan, outputPath, error)) {
+        aimp::PdfComposeOptions options {};
+        options.headerText = "Header Demo";
+        options.footerText = "Footer Demo";
+        options.includeSheetNumber = false;
+        if (!aimp::ComposePlanPdf(plan, outputPath, options, error)) {
             return Fail("ComposePlanPdf should generate a PDF file.");
         }
 
@@ -167,6 +171,15 @@ int main() {
         file.read(header.data(), static_cast<std::streamsize>(header.size()));
         if (header.rfind("%PDF-1.4", 0) != 0) {
             return Fail("ComposePlanPdf should write a valid PDF header.");
+        }
+
+        file.seekg(0, std::ios::end);
+        const std::streamsize size = static_cast<std::streamsize>(file.tellg());
+        file.seekg(0, std::ios::beg);
+        std::string body(static_cast<std::size_t>(size), '\0');
+        file.read(body.data(), size);
+        if (body.find("Header Demo") == std::string::npos || body.find("Footer Demo") == std::string::npos) {
+            return Fail("ComposePlanPdf should include configured header/footer text.");
         }
     }
 

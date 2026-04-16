@@ -32,7 +32,10 @@ std::size_t SheetCount(const ImpositionPlan& plan) {
 
 } // namespace
 
-bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, std::string& errorMessage) {
+bool ComposePlanPdf(const ImpositionPlan& plan,
+                    const std::string& outputPath,
+                    const PdfComposeOptions& options,
+                    std::string& errorMessage) {
     std::ofstream out(outputPath, std::ios::binary);
     if (!out) {
         errorMessage = "Could not open output file";
@@ -59,7 +62,12 @@ bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, s
         pageObjectIds.push_back(pageObj);
 
         std::ostringstream content;
-        content << "BT /F1 14 Tf 36 " << (pageHeight - 40.0) << " Td (Imposition sheet " << sheet << ") Tj ET\n";
+        if (!options.headerText.empty()) {
+            content << "BT /F1 12 Tf 36 " << (pageHeight - 24.0) << " Td (" << EscapePdfText(options.headerText) << ") Tj ET\n";
+        }
+        if (options.includeSheetNumber) {
+            content << "BT /F1 14 Tf 36 " << (pageHeight - 40.0) << " Td (Imposition sheet " << sheet << ") Tj ET\n";
+        }
         double y = pageHeight - 70.0;
         for (const auto& placement : plan.placements) {
             if (placement.sheetIndex != sheet) {
@@ -76,6 +84,9 @@ bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, s
             if (y < 36.0) {
                 break;
             }
+        }
+        if (!options.footerText.empty()) {
+            content << "BT /F1 10 Tf 36 24 Td (" << EscapePdfText(options.footerText) << ") Tj ET\n";
         }
 
         const std::string contentData = content.str();
@@ -127,6 +138,10 @@ bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, s
         return false;
     }
     return true;
+}
+
+bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, std::string& errorMessage) {
+    return ComposePlanPdf(plan, outputPath, PdfComposeOptions {}, errorMessage);
 }
 
 } // namespace aimp
