@@ -1,2 +1,145 @@
-# Imposr
-Imposr is a powerful Adobe Acrobat plugin for professional PDF imposition. Create booklets, N-up layouts, step &amp; repeat, and print-ready sheets with full control over layout, bleed, marks, and automation workflows.
+# Acrobat Imposition Plugin
+
+A starter repository for an **Adobe Acrobat Pro plug-in** focused on PDF imposition and print layout workflows:
+
+- booklet imposition
+- N-up
+- step & repeat
+- page padding with blanks
+- page ordering and simple transforms
+- output PDF generation
+
+This repository is intentionally a **solid starter** rather than a full production plug-in. It gives you:
+
+- a clean repo structure
+- an Acrobat plug-in entry skeleton
+- a first menu command inside Acrobat
+- a basic imposition planning model in C++
+- roadmap and architecture notes
+
+## Current scope
+
+Implemented in this starter:
+
+- plug-in handshake callbacks (`PluginExportHFTs`, `PluginImportReplaceAndRegister`, `PluginInit`, `PluginUnload`)
+- Acrobat menu registration
+- stub command for `Plug-ins > Acrobat Imposition Plugin > 2-Up Demo`
+- core data structures for imposition jobs and slot placement
+- demo planner for 2-up layout generation
+
+Not yet implemented:
+
+- actual page composition into a new PDF
+- booklet signatures
+- creep / trim shift
+- bleed / crop marks
+- CSV variable data
+- inspector / reverse mapping
+
+## Adobe SDK requirements
+
+This project depends on the **Adobe Acrobat SDK**.
+
+Official Adobe documentation states that Acrobat plug-ins:
+
+- are built in native C/C++
+- must include the SDK support file `PIMain.c`
+- use the standard plug-in callbacks and handshake mechanism
+- should target current supported 64-bit Acrobat environments
+
+See Adobe’s official SDK docs:
+
+- plug-in lifecycle and handshake
+- creating a simple plug-in
+- getting started / release notes
+
+## Expected local setup
+
+### Windows
+
+Recommended:
+
+- Visual Studio 2019 or newer
+- latest Acrobat SDK downloaded locally
+- Adobe Acrobat Pro installed locally for testing
+
+### Environment variables
+
+Set one of these before configuring the build:
+
+- `ACROBAT_SDK_DIR`
+- or edit the paths in `CMakeLists.txt`
+
+Expected SDK layout examples:
+
+- `C:/SDKs/AcrobatSDK`
+- `${ACROBAT_SDK_DIR}/API`
+- `${ACROBAT_SDK_DIR}/PluginSupport`
+
+> Note: actual folder names vary slightly by SDK version. Adjust include paths to your installed SDK.
+
+## Build
+
+```bash
+cmake -S . -B build -DACROBAT_SDK_DIR="C:/SDKs/AcrobatSDK"
+cmake --build build --config Release
+```
+
+The output should be a plug-in binary you can place in Acrobat’s plug-ins folder for local testing.
+
+## Repository layout
+
+```text
+.
+├── .github/
+├── docs/
+├── include/
+│   └── aimp/
+├── samples/
+├── src/
+├── .gitignore
+├── CMakeLists.txt
+├── LICENSE
+└── README.md
+```
+
+## First milestones
+
+### Milestone 1
+- load plug-in in Acrobat
+- show menu
+- trigger demo action
+- create imposition planning objects
+
+### Milestone 2
+- read current document pages
+- build 2-up output plan
+- generate a new PDF document
+
+### Milestone 3
+- booklet mode
+- page padding to multiple of 4
+- rotate / scale / center
+
+### Milestone 4
+- bleed / marks / creep
+- overlays / numbering
+- presets / XML audit trail
+
+## GitHub publishing
+
+Recommended new repository name:
+
+- `acrobat-imposition-plugin`
+
+Suggested first tags:
+
+- `adobe-acrobat`
+- `pdf`
+- `imposition`
+- `prepress`
+- `cpp`
+
+## License
+
+This starter is released under the MIT License. Change this before publishing if you prefer a different license.
