@@ -110,10 +110,13 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+<<<<<<< achimpieters/create-c++-plug-in-plan-for-acrobat-ec01kb
 CI note:
 
 - GitHub Actions workflow `.github/workflows/planner-ci.yml` runs planner-only configure/build/test on Ubuntu, macOS, and Windows with `AIMP_BUILD_PLUGIN=OFF`.
 
+=======
+>>>>>>> main
 CLI examples:
 
 ```bash
