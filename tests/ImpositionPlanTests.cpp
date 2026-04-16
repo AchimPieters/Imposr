@@ -4,6 +4,7 @@
 #include "aimp/Preset.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -13,6 +14,15 @@ namespace {
 int Fail(const char* message) {
     std::cerr << "FAIL: " << message << '\n';
     return EXIT_FAILURE;
+}
+
+std::filesystem::path TempPath(const std::string& filename) {
+    std::error_code ec;
+    auto base = std::filesystem::temp_directory_path(ec);
+    if (ec) {
+        base = std::filesystem::current_path();
+    }
+    return base / filename;
 }
 
 } // namespace
@@ -196,7 +206,7 @@ int main() {
     {
         const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
         std::string error;
-        const std::string outputPath = "/tmp/aimp_test_output.pdf";
+        const std::string outputPath = TempPath("aimp_test_output.pdf").string();
         aimp::PdfComposeOptions options {};
         options.headerText = "Header Demo";
         options.footerText = "Footer Demo";
@@ -231,7 +241,7 @@ int main() {
     {
         const auto plan = aimp::TwoUpPlanner::Build("doc", 4, {595.0, 842.0});
         aimp::ArtifactBundleOptions options {};
-        options.outputDirectory = "/tmp/aimp_bundle_output";
+        options.outputDirectory = TempPath("aimp_bundle_output").string();
         options.baseName = "bundle-test";
         options.includePdf = true;
         options.pdfOptions.headerText = "Bundle Header";
@@ -283,7 +293,7 @@ int main() {
         preset.pdfOptions.batesStart = 100;
 
         std::string error;
-        const std::string presetPath = "/tmp/aimp_test_preset.txt";
+        const std::string presetPath = TempPath("aimp_test_preset.txt").string();
         if (!aimp::SavePreset(preset, presetPath, error)) {
             return Fail("SavePreset should succeed.");
         }
@@ -317,7 +327,7 @@ int main() {
     }
 
     {
-        const std::string invalidPresetPath = "/tmp/aimp_invalid_preset.txt";
+        const std::string invalidPresetPath = TempPath("aimp_invalid_preset.txt").string();
         {
             std::ofstream out(invalidPresetPath);
             out << "sheetWidth=abc\n"; // invalid
