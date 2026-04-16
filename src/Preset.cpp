@@ -87,6 +87,7 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "reverse=" << (preset.buildOptions.reverseOrder ? 1 : 0) << '\n';
     out << "filter=" << FilterToString(preset.buildOptions.filter) << '\n';
     out << "padMultiple=" << preset.buildOptions.padToMultiple << '\n';
+    out << "bookletSignatureSize=" << preset.buildOptions.bookletSignatureSize << '\n';
     out << "pdfSheetNumber=" << (preset.pdfOptions.includeSheetNumber ? 1 : 0) << '\n';
     out << "pdfHeader=" << preset.pdfOptions.headerText << '\n';
     out << "pdfFooter=" << preset.pdfOptions.footerText << '\n';
@@ -135,6 +136,11 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     if (!RequireKey(values, "slotWidth", raw) || !ParseDouble(raw, preset.slotWidth)) return fail("slotWidth");
     if (!RequireKey(values, "slotHeight", raw) || !ParseDouble(raw, preset.slotHeight)) return fail("slotHeight");
     if (!RequireKey(values, "padMultiple", raw) || !ParseUInt(raw, preset.buildOptions.padToMultiple)) return fail("padMultiple");
+    if (RequireKey(values, "bookletSignatureSize", raw)) {
+        if (!ParseUInt(raw, preset.buildOptions.bookletSignatureSize)) return fail("bookletSignatureSize");
+    } else {
+        preset.buildOptions.bookletSignatureSize = 0;
+    }
     if (!RequireKey(values, "filter", raw)) return fail("filter");
     preset.buildOptions.filter = StringToFilter(raw);
     if (!RequireKey(values, "reverse", raw) || !ParseBool(raw, preset.buildOptions.reverseOrder)) return fail("reverse");

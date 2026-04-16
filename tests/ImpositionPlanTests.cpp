@@ -51,6 +51,21 @@ int main() {
     }
 
     {
+        aimp::BuildOptions options {};
+        options.bookletSignatureSize = 8;
+        const auto plan = aimp::BookletPlanner::Build("doc", 10, {1000.0, 700.0}, options);
+        if (plan.paddedPageCount != 16) {
+            return Fail("Booklet signature sizing should pad each signature to configured size.");
+        }
+        if (plan.placements.size() != 16) {
+            return Fail("Booklet signature sizing should keep deterministic blank placements.");
+        }
+        if (plan.placements[8].sourcePage.pageIndex != aimp::kBlankPageIndex) {
+            return Fail("Second signature front-left should be blank when only 2 pages remain.");
+        }
+    }
+
+    {
         const auto json = aimp::ToJson(aimp::TwoUpPlanner::Build("doc", 2, {1000.0, 700.0}));
         if (json.find("\"placements\"") == std::string::npos) {
             return Fail("JSON output should include placements.");
@@ -204,6 +219,7 @@ int main() {
         preset.buildOptions.reverseOrder = true;
         preset.buildOptions.filter = aimp::PageFilter::OddOnly;
         preset.buildOptions.padToMultiple = 4;
+        preset.buildOptions.bookletSignatureSize = 16;
         preset.pdfOptions.headerText = "Preset Header";
         preset.pdfOptions.footerText = "Preset Footer";
         preset.pdfOptions.includeSheetNumber = false;
@@ -227,6 +243,9 @@ int main() {
         }
         if (loaded.buildOptions.filter != aimp::PageFilter::OddOnly || !loaded.buildOptions.reverseOrder) {
             return Fail("Loaded preset build options mismatch.");
+        }
+        if (loaded.buildOptions.bookletSignatureSize != 16) {
+            return Fail("Loaded preset booklet signature size mismatch.");
         }
         if (loaded.pdfOptions.headerText != "Preset Header" || loaded.pdfOptions.includeSheetNumber) {
             return Fail("Loaded preset PDF options mismatch.");

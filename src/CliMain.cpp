@@ -16,9 +16,9 @@ void PrintUsage() {
         << "Usage:\n"
         << "  imposr_cli two-up --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
         << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
-        << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
+        << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--signature-size <N>] [--out <file>]\n"
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -217,6 +217,11 @@ int main(int argc, char** argv) {
         } else if (key == "--pad-multiple") {
             if (!ParseUInt(value, buildOptions.padToMultiple)) {
                 std::cerr << "Invalid value for --pad-multiple\n";
+                return 1;
+            }
+        } else if (key == "--signature-size") {
+            if (!ParseUInt(value, buildOptions.bookletSignatureSize)) {
+                std::cerr << "Invalid value for --signature-size\n";
                 return 1;
             }
         } else if (key == "--filter") {
