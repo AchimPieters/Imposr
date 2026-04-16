@@ -16,7 +16,7 @@ void PrintUsage() {
         << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
         << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
-        << "Common options for all modes: [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N]\n";
+        << "Common options for all modes: [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--audit-out <file.xml>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
     double slotWidth = 0.0;
     double slotHeight = 0.0;
     std::string outPath;
+    std::string auditOutPath;
     aimp::BuildOptions buildOptions {};
 
     for (int i = 2; i < argc; ++i) {
@@ -90,6 +91,8 @@ int main(int argc, char** argv) {
             }
         } else if (key == "--out") {
             outPath = value;
+        } else if (key == "--audit-out") {
+            auditOutPath = value;
         } else if (key == "--repeat-x") {
             if (!ParseUInt(value, repeatX)) {
                 std::cerr << "Invalid value for --repeat-x\n";
@@ -190,6 +193,15 @@ int main(int argc, char** argv) {
         file << json;
     } else {
         std::cout << json;
+    }
+
+    if (!auditOutPath.empty()) {
+        std::ofstream file(auditOutPath);
+        if (!file) {
+            std::cerr << "Could not open audit output file: " << auditOutPath << '\n';
+            return 1;
+        }
+        file << aimp::ToAuditXml(plan);
     }
 
     return 0;

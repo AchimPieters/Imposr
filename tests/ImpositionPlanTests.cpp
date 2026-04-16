@@ -42,7 +42,7 @@ int main() {
         if (plan.placements.size() != 8) {
             return Fail("Booklet should keep padded blank slots for deterministic composition.");
         }
-        if (plan.placements.front().sourcePage.pageIndex != UINT32_MAX) {
+        if (plan.placements.front().sourcePage.pageIndex != aimp::kBlankPageIndex) {
             return Fail("Booklet front-left slot should be blank for 6-page signature.");
         }
     }
@@ -80,7 +80,7 @@ int main() {
         if (plan.paddedPageCount != 8) {
             return Fail("NUp with padToMultiple=4 should pad to 8.");
         }
-        if (plan.placements.back().sourcePage.pageIndex != UINT32_MAX) {
+        if (plan.placements.back().sourcePage.pageIndex != aimp::kBlankPageIndex) {
             return Fail("NUp padded slots should carry blank page marker.");
         }
     }
@@ -123,6 +123,16 @@ int main() {
         const auto json = aimp::ToJson(aimp::TwoUpPlanner::Build("a\"b\\c", 1, {1000.0, 700.0}));
         if (json.find("a\\\"b\\\\c") == std::string::npos) {
             return Fail("JSON output should escape document IDs.");
+        }
+    }
+
+    {
+        const auto xml = aimp::ToAuditXml(aimp::TwoUpPlanner::Build("a&b", 1, {1000.0, 700.0}));
+        if (xml.find("<imposition-plan") == std::string::npos) {
+            return Fail("Audit XML should include root element.");
+        }
+        if (xml.find("a&amp;b") == std::string::npos) {
+            return Fail("Audit XML should escape source document IDs.");
         }
     }
 

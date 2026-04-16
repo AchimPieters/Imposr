@@ -59,12 +59,28 @@ std::vector<std::uint32_t> BuildSourcePages(std::uint32_t pageCount, const Build
         if (remainder != 0) {
             const std::size_t padNeeded = options.padToMultiple - remainder;
             for (std::size_t i = 0; i < padNeeded; ++i) {
-                pages.push_back(UINT32_MAX);
+                pages.push_back(kBlankPageIndex);
             }
         }
     }
 
     return pages;
+}
+
+std::string EscapeXml(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    for (char ch : input) {
+        switch (ch) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '\'': out += "&apos;"; break;
+            case '"': out += "&quot;"; break;
+            default: out += ch; break;
+        }
+    }
+    return out;
 }
 
 }
@@ -94,8 +110,8 @@ ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
         placement.slotIndex = slotIndex;
-        if (sourcePageIndex == UINT32_MAX) {
-            placement.sourcePage = PageRef {"", UINT32_MAX};
+        if (sourcePageIndex == kBlankPageIndex) {
+            placement.sourcePage = PageRef {"", kBlankPageIndex};
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
@@ -152,8 +168,8 @@ ImpositionPlan NUpPlanner::Build(const std::string& sourceDocumentId,
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
         placement.slotIndex = slotIndex;
-        if (sourcePageIndex == UINT32_MAX) {
-            placement.sourcePage = PageRef {"", UINT32_MAX};
+        if (sourcePageIndex == kBlankPageIndex) {
+            placement.sourcePage = PageRef {"", kBlankPageIndex};
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
@@ -190,7 +206,7 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
 
     const std::uint32_t padded = static_cast<std::uint32_t>(((sourcePages.size() + 3u) / 4u) * 4u);
     while (sourcePages.size() < padded) {
-        sourcePages.push_back(UINT32_MAX);
+        sourcePages.push_back(kBlankPageIndex);
     }
     plan.paddedPageCount = padded;
 
@@ -203,8 +219,8 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
         placement.slotIndex = slotIndex;
-        if (sourcePageIndex == UINT32_MAX) {
-            placement.sourcePage = PageRef {"", UINT32_MAX};
+        if (sourcePageIndex == kBlankPageIndex) {
+            placement.sourcePage = PageRef {"", kBlankPageIndex};
         } else {
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
@@ -273,8 +289,8 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                 placement.sheetIndex = sheetIndex;
                 placement.slotIndex = y * config.repeatX + x;
                 const std::uint32_t sourcePageIndex = sourcePages[sourcePagePos];
-                if (sourcePageIndex == UINT32_MAX) {
-                    placement.sourcePage = PageRef {"", UINT32_MAX};
+                if (sourcePageIndex == kBlankPageIndex) {
+                    placement.sourcePage = PageRef {"", kBlankPageIndex};
                 } else {
                     placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
                 }
@@ -337,6 +353,34 @@ std::string ToJson(const ImpositionPlan& plan) {
 
     out << "  ]\n";
     out << "}\n";
+    return out.str();
+}
+
+std::string ToAuditXml(const ImpositionPlan& plan) {
+    std::ostringstream out;
+    out << "<imposition-plan mode=\"" << LayoutModeName(plan.mode) << "\" "
+        << "sourcePageCount=\"" << plan.sourcePageCount << "\" "
+        << "paddedPageCount=\"" << plan.paddedPageCount << "\">\n";
+    out << "  <output-sheet widthPoints=\"" << plan.outputSheet.widthPoints
+        << "\" heightPoints=\"" << plan.outputSheet.heightPoints << "\" />\n";
+    out << "  <placements>\n";
+
+    for (const auto& p : plan.placements) {
+        out << "    <placement sheetIndex=\"" << p.sheetIndex
+            << "\" slotIndex=\"" << p.slotIndex
+            << "\" rotationDegrees=\"" << p.rotationDegrees
+            << "\" scale=\"" << p.scale << "\">\n";
+        out << "      <source documentId=\"" << EscapeXml(p.sourcePage.sourceDocumentId)
+            << "\" pageIndex=\"" << p.sourcePage.pageIndex << "\" />\n";
+        out << "      <targetRect x=\"" << p.targetRect.x
+            << "\" y=\"" << p.targetRect.y
+            << "\" width=\"" << p.targetRect.width
+            << "\" height=\"" << p.targetRect.height << "\" />\n";
+        out << "    </placement>\n";
+    }
+
+    out << "  </placements>\n";
+    out << "</imposition-plan>\n";
     return out.str();
 }
 

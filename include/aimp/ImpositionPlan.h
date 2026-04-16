@@ -26,6 +26,8 @@ struct PageRef {
     std::uint32_t pageIndex {0};
 };
 
+constexpr std::uint32_t kBlankPageIndex = 0xFFFFFFFFu;
+
 struct SheetSize {
     double widthPoints {0.0};
     double heightPoints {0.0};
@@ -106,5 +108,6 @@ public:
 
 const char* LayoutModeName(LayoutMode mode);
 std::string ToJson(const ImpositionPlan& plan);
+std::string ToAuditXml(const ImpositionPlan& plan);
 
 } // namespace aimp
