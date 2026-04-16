@@ -29,6 +29,7 @@ set(PLUGIN_NAME AcrobatImpositionPlugin)
 add_library(aimp_core STATIC
   src/ImpositionPlan.cpp
   src/PdfComposer.cpp
+  src/Preset.cpp
 )
 
 target_include_directories(aimp_core PUBLIC

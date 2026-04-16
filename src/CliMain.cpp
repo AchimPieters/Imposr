@@ -1,5 +1,6 @@
 #include "aimp/ImpositionPlan.h"
 #include "aimp/PdfComposer.h"
+#include "aimp/Preset.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -17,7 +18,7 @@ void PrintUsage() {
         << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
         << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
-        << "Common options for all modes: [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -61,6 +62,35 @@ int main(int argc, char** argv) {
     std::uint32_t inspectSheet = aimp::kBlankPageIndex;
     std::uint32_t inspectSlot = aimp::kBlankPageIndex;
     aimp::BuildOptions buildOptions {};
+    std::string savePresetPath;
+    std::string loadPresetPath;
+
+    for (int i = 2; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--load-preset") {
+            loadPresetPath = argv[i + 1];
+        }
+    }
+
+    if (!loadPresetPath.empty()) {
+        aimp::PlannerPreset preset {};
+        std::string error;
+        if (!aimp::LoadPreset(loadPresetPath, preset, error)) {
+            std::cerr << "Could not load preset: " << error << '\n';
+            return 1;
+        }
+        sheetWidth = preset.sheetSize.widthPoints;
+        sheetHeight = preset.sheetSize.heightPoints;
+        columns = preset.columns;
+        rows = preset.rows;
+        repeatX = preset.repeatX;
+        repeatY = preset.repeatY;
+        stepX = preset.stepX;
+        stepY = preset.stepY;
+        slotWidth = preset.slotWidth;
+        slotHeight = preset.slotHeight;
+        buildOptions = preset.buildOptions;
+        pdfOptions = preset.pdfOptions;
+    }
 
     for (int i = 2; i < argc; ++i) {
         const std::string key = argv[i];
@@ -99,6 +129,11 @@ int main(int argc, char** argv) {
             outPath = value;
         } else if (key == "--audit-out") {
             auditOutPath = value;
+        } else if (key == "--load-preset") {
+            // Already handled in first pass.
+            continue;
+        } else if (key == "--save-preset") {
+            savePresetPath = value;
         } else if (key == "--pdf-out") {
             pdfOutPath = value;
         } else if (key == "--pdf-header") {
@@ -112,6 +147,21 @@ int main(int argc, char** argv) {
                 return 1;
             }
             pdfOptions.includeSheetNumber = (raw == 1);
+        } else if (key == "--pdf-bates-enable") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --pdf-bates-enable (expected 0 or 1)\n";
+                return 1;
+            }
+            pdfOptions.includeBates = (raw == 1);
+        } else if (key == "--pdf-bates-prefix") {
+            pdfOptions.batesPrefix = value;
+            pdfOptions.includeBates = true;
+        } else if (key == "--pdf-bates-start") {
+            if (!ParseUInt(value, pdfOptions.batesStart)) {
+                std::cerr << "Invalid value for --pdf-bates-start\n";
+                return 1;
+            }
         } else if (key == "--inspect-source-page") {
             if (!ParseUInt(value, inspectSourcePage)) {
                 std::cerr << "Invalid value for --inspect-source-page\n";
@@ -242,6 +292,26 @@ int main(int argc, char** argv) {
         std::string errorMessage;
         if (!aimp::ComposePlanPdf(plan, pdfOutPath, pdfOptions, errorMessage)) {
             std::cerr << "Could not write PDF output: " << errorMessage << '\n';
+            return 1;
+        }
+    }
+
+    if (!savePresetPath.empty()) {
+        aimp::PlannerPreset preset {};
+        preset.sheetSize = sheet;
+        preset.columns = columns;
+        preset.rows = rows;
+        preset.repeatX = repeatX;
+        preset.repeatY = repeatY;
+        preset.stepX = stepX;
+        preset.stepY = stepY;
+        preset.slotWidth = slotWidth;
+        preset.slotHeight = slotHeight;
+        preset.buildOptions = buildOptions;
+        preset.pdfOptions = pdfOptions;
+        std::string error;
+        if (!aimp::SavePreset(preset, savePresetPath, error)) {
+            std::cerr << "Could not save preset: " << error << '\n';
             return 1;
         }
     }

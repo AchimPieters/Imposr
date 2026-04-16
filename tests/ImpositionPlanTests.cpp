@@ -1,5 +1,6 @@
 #include "aimp/ImpositionPlan.h"
 #include "aimp/PdfComposer.h"
+#include "aimp/Preset.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -162,6 +163,9 @@ int main() {
         options.headerText = "Header Demo";
         options.footerText = "Footer Demo";
         options.includeSheetNumber = false;
+        options.includeBates = true;
+        options.batesPrefix = "B-";
+        options.batesStart = 10;
         if (!aimp::ComposePlanPdf(plan, outputPath, options, error)) {
             return Fail("ComposePlanPdf should generate a PDF file.");
         }
@@ -180,6 +184,55 @@ int main() {
         file.read(body.data(), size);
         if (body.find("Header Demo") == std::string::npos || body.find("Footer Demo") == std::string::npos) {
             return Fail("ComposePlanPdf should include configured header/footer text.");
+        }
+        if (body.find("B-10") == std::string::npos) {
+            return Fail("ComposePlanPdf should include Bates numbering when enabled.");
+        }
+    }
+
+    {
+        aimp::PlannerPreset preset {};
+        preset.sheetSize = {1000.0, 700.0};
+        preset.columns = 2;
+        preset.rows = 2;
+        preset.repeatX = 3;
+        preset.repeatY = 1;
+        preset.stepX = 200.0;
+        preset.stepY = 0.0;
+        preset.slotWidth = 200.0;
+        preset.slotHeight = 350.0;
+        preset.buildOptions.reverseOrder = true;
+        preset.buildOptions.filter = aimp::PageFilter::OddOnly;
+        preset.buildOptions.padToMultiple = 4;
+        preset.pdfOptions.headerText = "Preset Header";
+        preset.pdfOptions.footerText = "Preset Footer";
+        preset.pdfOptions.includeSheetNumber = false;
+        preset.pdfOptions.includeBates = true;
+        preset.pdfOptions.batesPrefix = "PR-";
+        preset.pdfOptions.batesStart = 100;
+
+        std::string error;
+        const std::string presetPath = "/tmp/aimp_test_preset.txt";
+        if (!aimp::SavePreset(preset, presetPath, error)) {
+            return Fail("SavePreset should succeed.");
+        }
+
+        aimp::PlannerPreset loaded {};
+        if (!aimp::LoadPreset(presetPath, loaded, error)) {
+            return Fail("LoadPreset should succeed.");
+        }
+
+        if (loaded.sheetSize.widthPoints != 1000.0 || loaded.columns != 2 || loaded.buildOptions.padToMultiple != 4) {
+            return Fail("Loaded preset scalar values mismatch.");
+        }
+        if (loaded.buildOptions.filter != aimp::PageFilter::OddOnly || !loaded.buildOptions.reverseOrder) {
+            return Fail("Loaded preset build options mismatch.");
+        }
+        if (loaded.pdfOptions.headerText != "Preset Header" || loaded.pdfOptions.includeSheetNumber) {
+            return Fail("Loaded preset PDF options mismatch.");
+        }
+        if (!loaded.pdfOptions.includeBates || loaded.pdfOptions.batesPrefix != "PR-" || loaded.pdfOptions.batesStart != 100) {
+            return Fail("Loaded preset Bates options mismatch.");
         }
     }
 

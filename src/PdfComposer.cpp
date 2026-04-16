@@ -56,6 +56,7 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
     std::vector<int> pageObjectIds;
     pageObjectIds.reserve(sheetCount);
 
+    std::uint32_t batesCounter = options.batesStart;
     for (std::size_t sheet = 0; sheet < sheetCount; ++sheet) {
         const int pageObj = firstPageObj + static_cast<int>(sheet) * 2;
         const int contentObj = pageObj + 1;
@@ -79,6 +80,9 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
                  << " srcPage=" << placement.sourcePage.pageIndex
                  << " rect=(" << placement.targetRect.x << "," << placement.targetRect.y
                  << "," << placement.targetRect.width << "," << placement.targetRect.height << ")";
+            if (options.includeBates) {
+                line << " bates=" << options.batesPrefix << batesCounter++;
+            }
             content << "BT /F1 10 Tf 36 " << y << " Td (" << EscapePdfText(line.str()) << ") Tj ET\n";
             y -= 14.0;
             if (y < 36.0) {
