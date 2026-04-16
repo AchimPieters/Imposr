@@ -28,6 +28,7 @@ Implemented in this starter:
 - core data structures for imposition jobs and slot placement
 - demo planner for 2-up layout generation
 - planner modules for 2-up, booklet, and generic N-up calculations
+- planner support for step-and-repeat layout
 - standalone planner tests that run without the Acrobat SDK
 - cross-platform CLI app (`imposr_cli`) that generates imposition plans as JSON
 
@@ -113,6 +114,7 @@ CLI examples:
 ./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89
 ./build/imposr_cli booklet --pages 28 --sheet-width 1190.55 --sheet-height 841.89 --out booklet-plan.json
 ./build/imposr_cli n-up --pages 16 --sheet-width 1190.55 --sheet-height 841.89 --columns 2 --rows 2
+./build/imposr_cli step-repeat --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --repeat-x 3 --repeat-y 2 --step-x 396.85 --step-y 420.94 --slot-width 396.85 --slot-height 420.94
 ```
 
 ## Repository layout

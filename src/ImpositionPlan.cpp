@@ -10,6 +10,12 @@ bool IsInvalidSheet(const SheetSize& outputSheet) {
     return outputSheet.widthPoints <= 0.0 || outputSheet.heightPoints <= 0.0;
 }
 
+bool IsRectOutsideSheet(const Rect& rect, const SheetSize& sheet) {
+    return rect.x < 0.0 || rect.y < 0.0 ||
+           rect.x + rect.width > sheet.widthPoints ||
+           rect.y + rect.height > sheet.heightPoints;
+}
+
 }
 
 ImpositionPlan TwoUpPlanner::Build(const std::string& sourceDocumentId,
@@ -154,10 +160,67 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
     return plan;
 }
 
+ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
+                                           std::uint32_t pageCount,
+                                           const SheetSize& outputSheet,
+                                           const StepRepeatConfig& config) {
+    ImpositionPlan plan {};
+    plan.mode = LayoutMode::StepAndRepeat;
+    plan.outputSheet = outputSheet;
+    plan.sourcePageCount = pageCount;
+    plan.paddedPageCount = pageCount;
+
+    if (pageCount == 0 || IsInvalidSheet(outputSheet) ||
+        config.repeatX == 0 || config.repeatY == 0 ||
+        config.seedRect.width <= 0.0 || config.seedRect.height <= 0.0) {
+        return plan;
+    }
+
+    std::uint32_t sourcePage = 0;
+    for (std::uint32_t sheetIndex = 0; sourcePage < pageCount; ++sheetIndex) {
+        for (std::uint32_t y = 0; y < config.repeatY && sourcePage < pageCount; ++y) {
+            for (std::uint32_t x = 0; x < config.repeatX && sourcePage < pageCount; ++x) {
+                Rect target {
+                    config.seedRect.x + static_cast<double>(x) * config.stepXPoints,
+                    config.seedRect.y + static_cast<double>(y) * config.stepYPoints,
+                    config.seedRect.width,
+                    config.seedRect.height
+                };
+
+                if (IsRectOutsideSheet(target, outputSheet)) {
+                    continue;
+                }
+
+                SlotPlacement placement {};
+                placement.sheetIndex = sheetIndex;
+                placement.slotIndex = y * config.repeatX + x;
+                placement.sourcePage = PageRef {sourceDocumentId, sourcePage};
+                placement.targetRect = target;
+                plan.placements.push_back(placement);
+                ++sourcePage;
+            }
+        }
+    }
+
+    return plan;
+}
+
+const char* LayoutModeName(LayoutMode mode) {
+    switch (mode) {
+        case LayoutMode::TwoUp: return "two-up";
+        case LayoutMode::Booklet: return "booklet";
+        case LayoutMode::NUp: return "n-up";
+        case LayoutMode::StepAndRepeat: return "step-and-repeat";
+        case LayoutMode::Manual: return "manual";
+        case LayoutMode::Tile: return "tile";
+        default: return "unknown";
+    }
+}
+
 std::string ToJson(const ImpositionPlan& plan) {
     std::ostringstream out;
     out << "{\n";
-    out << "  \"mode\": " << static_cast<int>(plan.mode) << ",\n";
+    out << "  \"mode\": \"" << LayoutModeName(plan.mode) << "\",\n";
     out << "  \"sourcePageCount\": " << plan.sourcePageCount << ",\n";
     out << "  \"paddedPageCount\": " << plan.paddedPageCount << ",\n";
     out << "  \"outputSheet\": {\"widthPoints\": " << plan.outputSheet.widthPoints

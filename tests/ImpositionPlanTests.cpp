@@ -55,6 +55,26 @@ int main() {
         if (json.find("\"sourcePageCount\": 2") == std::string::npos) {
             return Fail("JSON output should include sourcePageCount.");
         }
+        if (json.find("\"mode\": \"two-up\"") == std::string::npos) {
+            return Fail("JSON mode should use stable text values.");
+        }
+    }
+
+    {
+        const aimp::StepRepeatConfig config {
+            2,
+            2,
+            500.0,
+            350.0,
+            aimp::Rect {0.0, 0.0, 500.0, 350.0}
+        };
+        const auto plan = aimp::StepAndRepeatPlanner::Build("doc", 5, {1000.0, 700.0}, config);
+        if (plan.mode != aimp::LayoutMode::StepAndRepeat) {
+            return Fail("Step-and-repeat should return step-and-repeat mode.");
+        }
+        if (plan.placements.size() != 5) {
+            return Fail("Step-and-repeat should place all source pages when grid has capacity.");
+        }
     }
 
     std::cout << "All planner checks passed.\n";

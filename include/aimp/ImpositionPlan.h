@@ -49,6 +49,14 @@ struct ImpositionPlan {
     std::uint32_t paddedPageCount {0};
 };
 
+struct StepRepeatConfig {
+    std::uint32_t repeatX {1};
+    std::uint32_t repeatY {1};
+    double stepXPoints {0.0};
+    double stepYPoints {0.0};
+    Rect seedRect;
+};
+
 class TwoUpPlanner {
 public:
     static ImpositionPlan Build(const std::string& sourceDocumentId,
@@ -72,6 +80,15 @@ public:
                                 const SheetSize& outputSheet);
 };
 
+class StepAndRepeatPlanner {
+public:
+    static ImpositionPlan Build(const std::string& sourceDocumentId,
+                                std::uint32_t pageCount,
+                                const SheetSize& outputSheet,
+                                const StepRepeatConfig& config);
+};
+
+const char* LayoutModeName(LayoutMode mode);
 std::string ToJson(const ImpositionPlan& plan);
 
 } // namespace aimp
