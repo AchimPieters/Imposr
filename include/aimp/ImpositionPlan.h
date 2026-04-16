@@ -49,6 +49,11 @@ struct SlotPlacement {
     double scale {1.0};
 };
 
+struct PlacementRef {
+    std::uint32_t sheetIndex {0};
+    std::uint32_t slotIndex {0};
+};
+
 struct ImpositionPlan {
     LayoutMode mode {LayoutMode::TwoUp};
     SheetSize outputSheet;
@@ -109,5 +114,12 @@ public:
 const char* LayoutModeName(LayoutMode mode);
 std::string ToJson(const ImpositionPlan& plan);
 std::string ToAuditXml(const ImpositionPlan& plan);
+std::vector<PlacementRef> FindPlacementsForSourcePage(const ImpositionPlan& plan,
+                                                      const std::string& sourceDocumentId,
+                                                      std::uint32_t pageIndex);
+bool TryGetSourceForPlacement(const ImpositionPlan& plan,
+                              std::uint32_t sheetIndex,
+                              std::uint32_t slotIndex,
+                              PageRef& outSourcePage);
 
 } // namespace aimp

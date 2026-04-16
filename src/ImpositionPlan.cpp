@@ -384,4 +384,30 @@ std::string ToAuditXml(const ImpositionPlan& plan) {
     return out.str();
 }
 
+std::vector<PlacementRef> FindPlacementsForSourcePage(const ImpositionPlan& plan,
+                                                      const std::string& sourceDocumentId,
+                                                      std::uint32_t pageIndex) {
+    std::vector<PlacementRef> matches;
+    for (const auto& placement : plan.placements) {
+        if (placement.sourcePage.sourceDocumentId == sourceDocumentId &&
+            placement.sourcePage.pageIndex == pageIndex) {
+            matches.push_back(PlacementRef {placement.sheetIndex, placement.slotIndex});
+        }
+    }
+    return matches;
+}
+
+bool TryGetSourceForPlacement(const ImpositionPlan& plan,
+                              std::uint32_t sheetIndex,
+                              std::uint32_t slotIndex,
+                              PageRef& outSourcePage) {
+    for (const auto& placement : plan.placements) {
+        if (placement.sheetIndex == sheetIndex && placement.slotIndex == slotIndex) {
+            outSourcePage = placement.sourcePage;
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace aimp

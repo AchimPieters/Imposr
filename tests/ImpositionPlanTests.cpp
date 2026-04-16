@@ -1,6 +1,8 @@
 #include "aimp/ImpositionPlan.h"
+#include "aimp/PdfComposer.h"
 
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -133,6 +135,51 @@ int main() {
         }
         if (xml.find("a&amp;b") == std::string::npos) {
             return Fail("Audit XML should escape source document IDs.");
+        }
+    }
+
+    {
+        const auto plan = aimp::TwoUpPlanner::Build("doc", 4, {1000.0, 700.0});
+        const auto matches = aimp::FindPlacementsForSourcePage(plan, "doc", 2);
+        if (matches.size() != 1 || matches.front().sheetIndex != 1 || matches.front().slotIndex != 0) {
+            return Fail("Inspector source->placement mapping mismatch.");
+        }
+
+        aimp::PageRef source {};
+        if (!aimp::TryGetSourceForPlacement(plan, 0, 1, source)) {
+            return Fail("Inspector placement->source lookup should succeed.");
+        }
+        if (source.pageIndex != 1 || source.sourceDocumentId != "doc") {
+            return Fail("Inspector placement->source lookup mismatch.");
+        }
+    }
+
+    {
+        const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
+        std::string error;
+        const std::string outputPath = "/tmp/aimp_test_output.pdf";
+        aimp::PdfComposeOptions options {};
+        options.headerText = "Header Demo";
+        options.footerText = "Footer Demo";
+        options.includeSheetNumber = false;
+        if (!aimp::ComposePlanPdf(plan, outputPath, options, error)) {
+            return Fail("ComposePlanPdf should generate a PDF file.");
+        }
+
+        std::ifstream file(outputPath, std::ios::binary);
+        std::string header(8, '\0');
+        file.read(header.data(), static_cast<std::streamsize>(header.size()));
+        if (header.rfind("%PDF-1.4", 0) != 0) {
+            return Fail("ComposePlanPdf should write a valid PDF header.");
+        }
+
+        file.seekg(0, std::ios::end);
+        const std::streamsize size = static_cast<std::streamsize>(file.tellg());
+        file.seekg(0, std::ios::beg);
+        std::string body(static_cast<std::size_t>(size), '\0');
+        file.read(body.data(), size);
+        if (body.find("Header Demo") == std::string::npos || body.find("Footer Demo") == std::string::npos) {
+            return Fail("ComposePlanPdf should include configured header/footer text.");
         }
     }
 
