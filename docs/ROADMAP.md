@@ -2,6 +2,7 @@
 
 ## v0.1
 - plug-in loads in Acrobat Pro
+- builds on Windows 11 and macOS (64-bit)
 - menu appears
 - 2-up planning model
 - active document page counting
