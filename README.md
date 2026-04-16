@@ -31,6 +31,7 @@ Implemented in this starter:
 - planner support for step-and-repeat layout
 - standalone planner tests that run without the Acrobat SDK
 - cross-platform CLI app (`imposr_cli`) that generates imposition plans as JSON
+- optional CLI PDF sheet report export (`--pdf-out`) for preview/debug output
 
 Not yet implemented:
 
@@ -116,6 +117,7 @@ CLI examples:
 ./build/imposr_cli step-repeat --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --repeat-x 3 --repeat-y 2 --step-x 396.85 --step-y 420.94 --slot-width 396.85 --slot-height 420.94
 ./build/imposr_cli two-up --pages 12 --sheet-width 1190.55 --sheet-height 841.89 --reverse 1 --filter even --pad-multiple 4
 ./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --audit-out plan-audit.xml
+./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --pdf-out plan-preview.pdf
 ./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --inspect-source-page 3
 ./build/imposr_cli two-up --pages 8 --sheet-width 1190.55 --sheet-height 841.89 --inspect-sheet 1 --inspect-slot 0
 ```

@@ -1,6 +1,8 @@
 #include "aimp/ImpositionPlan.h"
+#include "aimp/PdfComposer.h"
 
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -149,6 +151,22 @@ int main() {
         }
         if (source.pageIndex != 1 || source.sourceDocumentId != "doc") {
             return Fail("Inspector placement->source lookup mismatch.");
+        }
+    }
+
+    {
+        const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
+        std::string error;
+        const std::string outputPath = "/tmp/aimp_test_output.pdf";
+        if (!aimp::ComposePlanPdf(plan, outputPath, error)) {
+            return Fail("ComposePlanPdf should generate a PDF file.");
+        }
+
+        std::ifstream file(outputPath, std::ios::binary);
+        std::string header(8, '\0');
+        file.read(header.data(), static_cast<std::streamsize>(header.size()));
+        if (header.rfind("%PDF-1.4", 0) != 0) {
+            return Fail("ComposePlanPdf should write a valid PDF header.");
         }
     }
 
