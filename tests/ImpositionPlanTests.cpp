@@ -3,6 +3,7 @@
 #include "aimp/Preset.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -12,6 +13,15 @@ namespace {
 int Fail(const char* message) {
     std::cerr << "FAIL: " << message << '\n';
     return EXIT_FAILURE;
+}
+
+std::string BuildTempPath(const std::string& fileName) {
+    std::error_code ec;
+    const auto tempDir = std::filesystem::temp_directory_path(ec);
+    if (!ec) {
+        return (tempDir / fileName).string();
+    }
+    return (std::filesystem::current_path() / fileName).string();
 }
 
 } // namespace
@@ -211,7 +221,7 @@ int main() {
     {
         const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
         std::string error;
-        const std::string outputPath = "/tmp/aimp_test_output.pdf";
+        const std::string outputPath = BuildTempPath("aimp_test_output.pdf");
         aimp::PdfComposeOptions options {};
         options.headerText = "Header Demo";
         options.footerText = "Footer Demo";
@@ -283,7 +293,7 @@ int main() {
         preset.pdfOptions.bleedPoints = 5.0;
 
         std::string error;
-        const std::string presetPath = "/tmp/aimp_test_preset.txt";
+        const std::string presetPath = BuildTempPath("aimp_test_preset.txt");
         if (!aimp::SavePreset(preset, presetPath, error)) {
             return Fail("SavePreset should succeed.");
         }
@@ -324,7 +334,7 @@ int main() {
     }
 
     {
-        const std::string invalidPresetPath = "/tmp/aimp_invalid_preset.txt";
+        const std::string invalidPresetPath = BuildTempPath("aimp_invalid_preset.txt");
         {
             std::ofstream out(invalidPresetPath);
             out << "sheetWidth=abc\n"; // invalid

@@ -54,6 +54,18 @@ PageFilter StringToFilter(const std::string& value) {
     return PageFilter::All;
 }
 
+std::string TrimAscii(const std::string& value) {
+    std::size_t first = 0;
+    while (first < value.size() && (value[first] == ' ' || value[first] == '\t' || value[first] == '\r')) {
+        ++first;
+    }
+    std::size_t last = value.size();
+    while (last > first && (value[last - 1] == ' ' || value[last - 1] == '\t' || value[last - 1] == '\r')) {
+        --last;
+    }
+    return value.substr(first, last - first);
+}
+
 bool RequireKey(const std::unordered_map<std::string, std::string>& values,
                 const std::string& key,
                 std::string& outValue) {
@@ -129,7 +141,7 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         if (pos == std::string::npos) {
             continue;
         }
-        values[line.substr(0, pos)] = line.substr(pos + 1);
+        values[TrimAscii(line.substr(0, pos))] = TrimAscii(line.substr(pos + 1));
     }
 
     std::string raw;
