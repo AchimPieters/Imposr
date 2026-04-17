@@ -102,6 +102,7 @@ struct BuildOptions {
     bool autoRotateToFit {false};
     double sourcePageWidthPoints {0.0};
     double sourcePageHeightPoints {0.0};
+    double bookletCreepPerSheetPoints {0.0};
 };
 
 class TwoUpPlanner {
@@ -161,6 +162,7 @@ public:
 
 const char* LayoutModeName(LayoutMode mode);
 std::string ToJson(const ImpositionPlan& plan);
+std::string ToPlacementManifestJson(const ImpositionPlan& plan);
 std::string ToAuditXml(const ImpositionPlan& plan);
 std::vector<PlacementRef> FindPlacementsForSourcePage(const ImpositionPlan& plan,
                                                       const std::string& sourceDocumentId,

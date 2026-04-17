@@ -306,7 +306,8 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
 
     auto appendPlacement = [&](std::uint32_t sheetIndex,
                                std::uint32_t slotIndex,
-                               std::uint32_t sourcePageIndex) {
+                               std::uint32_t sourcePageIndex,
+                               double creepOffsetXPoints) {
 
         SlotPlacement placement {};
         placement.sheetIndex = sheetIndex;
@@ -317,7 +318,7 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
             placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
         }
         const Rect slotRect {
-            slotIndex == 0 ? 0.0 : halfWidth,
+            (slotIndex == 0 ? 0.0 : halfWidth) + creepOffsetXPoints,
             0.0,
             halfWidth,
             fullHeight
@@ -356,15 +357,18 @@ ImpositionPlan BookletPlanner::Build(const std::string& sourceDocumentId,
 
         const std::uint32_t signatureSheetCount = signaturePaddedPageCount / 4u;
         for (std::uint32_t signatureSheet = 0; signatureSheet < signatureSheetCount; ++signatureSheet) {
+            const double creepMagnitude = options.bookletCreepPerSheetPoints > 0.0
+                ? static_cast<double>(signatureSheet) * options.bookletCreepPerSheetPoints
+                : 0.0;
             const std::uint32_t frontLeft = signaturePaddedPageCount - 1u - (2u * signatureSheet);
             const std::uint32_t frontRight = 2u * signatureSheet;
             const std::uint32_t backLeft = 2u * signatureSheet + 1u;
             const std::uint32_t backRight = signaturePaddedPageCount - 2u - (2u * signatureSheet);
 
-            appendPlacement(sheetIndexOffset + signatureSheet * 2u, 0u, signaturePages[frontLeft]);
-            appendPlacement(sheetIndexOffset + signatureSheet * 2u, 1u, signaturePages[frontRight]);
-            appendPlacement(sheetIndexOffset + signatureSheet * 2u + 1u, 0u, signaturePages[backLeft]);
-            appendPlacement(sheetIndexOffset + signatureSheet * 2u + 1u, 1u, signaturePages[backRight]);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u, 0u, signaturePages[frontLeft], creepMagnitude);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u, 1u, signaturePages[frontRight], -creepMagnitude);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u + 1u, 0u, signaturePages[backLeft], creepMagnitude);
+            appendPlacement(sheetIndexOffset + signatureSheet * 2u + 1u, 1u, signaturePages[backRight], -creepMagnitude);
         }
         sheetIndexOffset += signatureSheetCount * 2u;
     }
@@ -581,6 +585,76 @@ std::string ToJson(const ImpositionPlan& plan) {
             << ", \"scale\": " << p.scale
             << "}";
 
+        if (i + 1 != plan.placements.size()) {
+            out << ",";
+        }
+        out << "\n";
+    }
+
+    out << "  ]\n";
+    out << "}\n";
+    return out.str();
+}
+
+std::string ToPlacementManifestJson(const ImpositionPlan& plan) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"mode\": \"" << LayoutModeName(plan.mode) << "\",\n";
+    out << "  \"sheet\": {\"widthPoints\": " << plan.outputSheet.widthPoints
+        << ", \"heightPoints\": " << plan.outputSheet.heightPoints << "},\n";
+    out << "  \"placements\": [\n";
+
+    for (std::size_t i = 0; i < plan.placements.size(); ++i) {
+        const auto& p = plan.placements[i];
+        // Affine transform for Acrobat-like placement handoff.
+        // Maps normalized source page space (0..1) into destination targetRect.
+        double a = p.targetRect.width;
+        double b = 0.0;
+        double c = 0.0;
+        double d = p.targetRect.height;
+        double e = p.targetRect.x;
+        double f = p.targetRect.y;
+        if (p.rotationDegrees == 90.0) {
+            a = 0.0;
+            b = p.targetRect.height;
+            c = -p.targetRect.width;
+            d = 0.0;
+            e = p.targetRect.x + p.targetRect.width;
+            f = p.targetRect.y;
+        } else if (p.rotationDegrees == 180.0) {
+            a = -p.targetRect.width;
+            b = 0.0;
+            c = 0.0;
+            d = -p.targetRect.height;
+            e = p.targetRect.x + p.targetRect.width;
+            f = p.targetRect.y + p.targetRect.height;
+        } else if (p.rotationDegrees == 270.0) {
+            a = 0.0;
+            b = -p.targetRect.height;
+            c = p.targetRect.width;
+            d = 0.0;
+            e = p.targetRect.x;
+            f = p.targetRect.y + p.targetRect.height;
+        }
+
+        out << "    {"
+            << "\"sheetIndex\": " << p.sheetIndex
+            << ", \"slotIndex\": " << p.slotIndex
+            << ", \"source\": {\"documentId\": \"" << EscapeJson(p.sourcePage.sourceDocumentId)
+            << "\", \"pageIndex\": " << p.sourcePage.pageIndex << "}"
+            << ", \"rotationDegrees\": " << p.rotationDegrees
+            << ", \"scale\": " << p.scale
+            << ", \"targetRect\": {\"x\": " << p.targetRect.x
+            << ", \"y\": " << p.targetRect.y
+            << ", \"width\": " << p.targetRect.width
+            << ", \"height\": " << p.targetRect.height << "}"
+            << ", \"ctm\": {\"a\": " << a
+            << ", \"b\": " << b
+            << ", \"c\": " << c
+            << ", \"d\": " << d
+            << ", \"e\": " << e
+            << ", \"f\": " << f << "}"
+            << "}";
         if (i + 1 != plan.placements.size()) {
             out << ",";
         }

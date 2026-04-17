@@ -5,7 +5,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <charconv>
+#include <chrono>
+#include <ctime>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -22,7 +26,7 @@ void PrintUsage() {
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
         << "  imposr_cli tile --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--tile-overlap <pt>] [--out <file>]\n"
         << "  imposr_cli manual --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> --manual-sequence <csv>\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--summary 0|1] [--validate 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--pdf-out <file.pdf>] [--output-dir <dir>] [--output-stem <name>] [--stamp-output 0|1] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--pdf-overlay-template <text>] [--pdf-variable-csv <file.csv>] [--summary 0|1] [--validate 0|1] [--fail-on-validation 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -68,6 +72,26 @@ bool ParsePageSequenceCsv(const std::string& csv, std::vector<std::uint32_t>& se
     return true;
 }
 
+std::string BuildUtcTimestamp() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm utc {};
+#if defined(_WIN32)
+    gmtime_s(&utc, &nowTime);
+#else
+    gmtime_r(&nowTime, &utc);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y%m%d-%H%M%SZ");
+    return out.str();
+}
+
+std::string BuildDefaultOutputStem(const std::string& mode, std::uint32_t pages) {
+    std::ostringstream out;
+    out << mode << '_' << pages << "p";
+    return out.str();
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -91,7 +115,11 @@ int main(int argc, char** argv) {
     double tileOverlap = 0.0;
     std::string outPath;
     std::string auditOutPath;
+    std::string manifestOutPath;
     std::string pdfOutPath;
+    std::string outputDir;
+    std::string outputStem;
+    bool stampOutput = false;
     aimp::PdfComposeOptions pdfOptions {};
     std::uint32_t inspectSourcePage = aimp::kBlankPageIndex;
     std::uint32_t inspectSheet = aimp::kBlankPageIndex;
@@ -101,6 +129,7 @@ int main(int argc, char** argv) {
     std::string loadPresetPath;
     bool emitSummary = false;
     bool emitValidation = false;
+    bool failOnValidation = false;
     std::string manualSequenceCsv;
     std::vector<std::uint32_t> manualSequence;
     std::string pageSequenceCsv;
@@ -174,6 +203,8 @@ int main(int argc, char** argv) {
             outPath = value;
         } else if (key == "--audit-out") {
             auditOutPath = value;
+        } else if (key == "--manifest-out") {
+            manifestOutPath = value;
         } else if (key == "--load-preset") {
             // Already handled in first pass.
             continue;
@@ -181,6 +212,17 @@ int main(int argc, char** argv) {
             savePresetPath = value;
         } else if (key == "--pdf-out") {
             pdfOutPath = value;
+        } else if (key == "--output-dir") {
+            outputDir = value;
+        } else if (key == "--output-stem") {
+            outputStem = value;
+        } else if (key == "--stamp-output") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --stamp-output (expected 0 or 1)\n";
+                return 1;
+            }
+            stampOutput = (raw == 1);
         } else if (key == "--pdf-header") {
             pdfOptions.headerText = value;
         } else if (key == "--pdf-footer") {
@@ -236,6 +278,10 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid value for --pdf-bleed\n";
                 return 1;
             }
+        } else if (key == "--pdf-overlay-template") {
+            pdfOptions.overlayTemplate = value;
+        } else if (key == "--pdf-variable-csv") {
+            pdfOptions.variableDataCsvPath = value;
         } else if (key == "--summary") {
             std::uint32_t raw = 0;
             if (!ParseUInt(value, raw) || raw > 1) {
@@ -250,6 +296,13 @@ int main(int argc, char** argv) {
                 return 1;
             }
             emitValidation = (raw == 1);
+        } else if (key == "--fail-on-validation") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --fail-on-validation (expected 0 or 1)\n";
+                return 1;
+            }
+            failOnValidation = (raw == 1);
         } else if (key == "--inspect-source-page") {
             if (!ParseUInt(value, inspectSourcePage)) {
                 std::cerr << "Invalid value for --inspect-source-page\n";
@@ -319,6 +372,11 @@ int main(int argc, char** argv) {
         } else if (key == "--signature-size") {
             if (!ParseUInt(value, buildOptions.bookletSignatureSize)) {
                 std::cerr << "Invalid value for --signature-size\n";
+                return 1;
+            }
+        } else if (key == "--creep") {
+            if (!ParseDouble(value, buildOptions.bookletCreepPerSheetPoints) || buildOptions.bookletCreepPerSheetPoints < 0.0) {
+                std::cerr << "Invalid value for --creep (expected >= 0)\n";
                 return 1;
             }
         } else if (key == "--fit-to-slot") {
@@ -432,6 +490,34 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (!outputDir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        if (ec) {
+            std::cerr << "Could not create --output-dir: " << outputDir << '\n';
+            return 1;
+        }
+
+        std::string resolvedStem = outputStem.empty() ? BuildDefaultOutputStem(mode, pages) : outputStem;
+        if (stampOutput) {
+            resolvedStem += "_" + BuildUtcTimestamp();
+        }
+
+        const std::filesystem::path base = std::filesystem::path(outputDir) / resolvedStem;
+        if (outPath.empty()) {
+            outPath = base.string() + ".plan.json";
+        }
+        if (auditOutPath.empty()) {
+            auditOutPath = base.string() + ".audit.xml";
+        }
+        if (manifestOutPath.empty()) {
+            manifestOutPath = base.string() + ".manifest.json";
+        }
+        if (pdfOutPath.empty()) {
+            pdfOutPath = base.string() + ".proof.pdf";
+        }
+    }
+
     const std::string json = aimp::ToJson(plan);
     if (!outPath.empty()) {
         std::ofstream file(outPath);
@@ -451,6 +537,15 @@ int main(int argc, char** argv) {
             return 1;
         }
         file << aimp::ToAuditXml(plan);
+    }
+
+    if (!manifestOutPath.empty()) {
+        std::ofstream file(manifestOutPath);
+        if (!file) {
+            std::cerr << "Could not open manifest output file: " << manifestOutPath << '\n';
+            return 1;
+        }
+        file << aimp::ToPlacementManifestJson(plan);
     }
 
     if (!pdfOutPath.empty()) {
@@ -498,13 +593,17 @@ int main(int argc, char** argv) {
         std::cout << "\n# Summary\n" << aimp::BuildHumanSummary(plan) << '\n';
     }
 
+    std::vector<aimp::ValidationIssue> validationIssues;
+    if (emitValidation || failOnValidation) {
+        validationIssues = aimp::ValidatePlan(plan);
+    }
+
     if (emitValidation) {
-        const auto issues = aimp::ValidatePlan(plan);
         std::cout << "\n# Validation\n";
-        if (issues.empty()) {
+        if (validationIssues.empty()) {
             std::cout << "OK\n";
         } else {
-            for (const auto& issue : issues) {
+            for (const auto& issue : validationIssues) {
                 std::cout << issue.code << ": " << issue.message << '\n';
             }
         }
@@ -518,6 +617,11 @@ int main(int argc, char** argv) {
         } else {
             std::cout << "(no source found)\n";
         }
+    }
+
+    if (failOnValidation && !validationIssues.empty()) {
+        std::cerr << "Validation failed with " << validationIssues.size() << " issue(s).\n";
+        return 2;
     }
 
     return 0;
