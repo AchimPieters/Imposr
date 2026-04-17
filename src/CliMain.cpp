@@ -18,7 +18,7 @@ void PrintUsage() {
         << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
         << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--signature-size <N>] [--out <file>]\n"
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--summary 0|1] [--validate 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--summary 0|1] [--validate 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -162,6 +162,35 @@ int main(int argc, char** argv) {
         } else if (key == "--pdf-bates-start") {
             if (!ParseUInt(value, pdfOptions.batesStart)) {
                 std::cerr << "Invalid value for --pdf-bates-start\n";
+                return 1;
+            }
+        } else if (key == "--pdf-trim-marks") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --pdf-trim-marks (expected 0 or 1)\n";
+                return 1;
+            }
+            pdfOptions.drawTrimMarks = (raw == 1);
+        } else if (key == "--pdf-trim-length") {
+            if (!ParseDouble(value, pdfOptions.trimMarkLengthPoints)) {
+                std::cerr << "Invalid value for --pdf-trim-length\n";
+                return 1;
+            }
+        } else if (key == "--pdf-trim-offset") {
+            if (!ParseDouble(value, pdfOptions.trimMarkOffsetPoints)) {
+                std::cerr << "Invalid value for --pdf-trim-offset\n";
+                return 1;
+            }
+        } else if (key == "--pdf-bleed-box") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --pdf-bleed-box (expected 0 or 1)\n";
+                return 1;
+            }
+            pdfOptions.drawBleedBox = (raw == 1);
+        } else if (key == "--pdf-bleed") {
+            if (!ParseDouble(value, pdfOptions.bleedPoints)) {
+                std::cerr << "Invalid value for --pdf-bleed\n";
                 return 1;
             }
         } else if (key == "--summary") {

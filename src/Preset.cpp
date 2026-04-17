@@ -98,6 +98,15 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "pdfIncludeBates=" << (preset.pdfOptions.includeBates ? 1 : 0) << '\n';
     out << "pdfBatesPrefix=" << preset.pdfOptions.batesPrefix << '\n';
     out << "pdfBatesStart=" << preset.pdfOptions.batesStart << '\n';
+    out << "pdfDrawSheetBorder=" << (preset.pdfOptions.drawSheetBorder ? 1 : 0) << '\n';
+    out << "pdfDrawSlotOutlines=" << (preset.pdfOptions.drawSlotOutlines ? 1 : 0) << '\n';
+    out << "pdfDrawSlotLabels=" << (preset.pdfOptions.drawSlotLabels ? 1 : 0) << '\n';
+    out << "pdfDrawCenterMarks=" << (preset.pdfOptions.drawCenterMarks ? 1 : 0) << '\n';
+    out << "pdfDrawTrimMarks=" << (preset.pdfOptions.drawTrimMarks ? 1 : 0) << '\n';
+    out << "pdfTrimMarkLength=" << preset.pdfOptions.trimMarkLengthPoints << '\n';
+    out << "pdfTrimMarkOffset=" << preset.pdfOptions.trimMarkOffsetPoints << '\n';
+    out << "pdfDrawBleedBox=" << (preset.pdfOptions.drawBleedBox ? 1 : 0) << '\n';
+    out << "pdfBleedPoints=" << preset.pdfOptions.bleedPoints << '\n';
 
     if (!out.good()) {
         errorMessage = "Failed while writing preset file";
@@ -174,6 +183,33 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     if (!RequireKey(values, "pdfIncludeBates", raw) || !ParseBool(raw, preset.pdfOptions.includeBates)) return fail("pdfIncludeBates");
     if (!RequireKey(values, "pdfBatesPrefix", preset.pdfOptions.batesPrefix)) return fail("pdfBatesPrefix");
     if (!RequireKey(values, "pdfBatesStart", raw) || !ParseUInt(raw, preset.pdfOptions.batesStart)) return fail("pdfBatesStart");
+    if (RequireKey(values, "pdfDrawSheetBorder", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.drawSheetBorder)) return fail("pdfDrawSheetBorder");
+    }
+    if (RequireKey(values, "pdfDrawSlotOutlines", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.drawSlotOutlines)) return fail("pdfDrawSlotOutlines");
+    }
+    if (RequireKey(values, "pdfDrawSlotLabels", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.drawSlotLabels)) return fail("pdfDrawSlotLabels");
+    }
+    if (RequireKey(values, "pdfDrawCenterMarks", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.drawCenterMarks)) return fail("pdfDrawCenterMarks");
+    }
+    if (RequireKey(values, "pdfDrawTrimMarks", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.drawTrimMarks)) return fail("pdfDrawTrimMarks");
+    }
+    if (RequireKey(values, "pdfTrimMarkLength", raw)) {
+        if (!ParseDouble(raw, preset.pdfOptions.trimMarkLengthPoints)) return fail("pdfTrimMarkLength");
+    }
+    if (RequireKey(values, "pdfTrimMarkOffset", raw)) {
+        if (!ParseDouble(raw, preset.pdfOptions.trimMarkOffsetPoints)) return fail("pdfTrimMarkOffset");
+    }
+    if (RequireKey(values, "pdfDrawBleedBox", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.drawBleedBox)) return fail("pdfDrawBleedBox");
+    }
+    if (RequireKey(values, "pdfBleedPoints", raw)) {
+        if (!ParseDouble(raw, preset.pdfOptions.bleedPoints)) return fail("pdfBleedPoints");
+    }
 
     return true;
 }

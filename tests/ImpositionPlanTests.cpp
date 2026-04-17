@@ -219,6 +219,11 @@ int main() {
         options.includeBates = true;
         options.batesPrefix = "B-";
         options.batesStart = 10;
+        options.drawTrimMarks = true;
+        options.trimMarkLengthPoints = 9.0;
+        options.trimMarkOffsetPoints = 4.0;
+        options.drawBleedBox = true;
+        options.bleedPoints = 6.0;
         if (!aimp::ComposePlanPdf(plan, outputPath, options, error)) {
             return Fail("ComposePlanPdf should generate a PDF file.");
         }
@@ -240,6 +245,9 @@ int main() {
         }
         if (body.find("B-10") == std::string::npos) {
             return Fail("ComposePlanPdf should include Bates numbering when enabled.");
+        }
+        if (body.find("trim-marks") == std::string::npos || body.find("bleed-box") == std::string::npos) {
+            return Fail("ComposePlanPdf should include trim marks and bleed box drawing when enabled.");
         }
     }
 
@@ -268,6 +276,11 @@ int main() {
         preset.pdfOptions.includeBates = true;
         preset.pdfOptions.batesPrefix = "PR-";
         preset.pdfOptions.batesStart = 100;
+        preset.pdfOptions.drawTrimMarks = true;
+        preset.pdfOptions.trimMarkLengthPoints = 8.0;
+        preset.pdfOptions.trimMarkOffsetPoints = 3.0;
+        preset.pdfOptions.drawBleedBox = true;
+        preset.pdfOptions.bleedPoints = 5.0;
 
         std::string error;
         const std::string presetPath = "/tmp/aimp_test_preset.txt";
@@ -300,6 +313,13 @@ int main() {
         }
         if (!loaded.pdfOptions.includeBates || loaded.pdfOptions.batesPrefix != "PR-" || loaded.pdfOptions.batesStart != 100) {
             return Fail("Loaded preset Bates options mismatch.");
+        }
+        if (!loaded.pdfOptions.drawTrimMarks ||
+            loaded.pdfOptions.trimMarkLengthPoints != 8.0 ||
+            loaded.pdfOptions.trimMarkOffsetPoints != 3.0 ||
+            !loaded.pdfOptions.drawBleedBox ||
+            loaded.pdfOptions.bleedPoints != 5.0) {
+            return Fail("Loaded preset trim/bleed options mismatch.");
         }
     }
 
