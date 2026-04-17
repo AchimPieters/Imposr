@@ -154,6 +154,7 @@ CLI examples:
 ```
 
 See also: `docs/MVP_STATUS.md` for a live status/checklist toward a full Acrobat Pro imposition product-MVP.
+If a PR gets stuck in GitHub conflict-resolution UI loops, use `docs/CONFLICT_PLAYBOOK.md`.
 
 ## First milestones
 
