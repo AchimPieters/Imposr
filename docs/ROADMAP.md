@@ -1,5 +1,9 @@
 # Roadmap and status
 
+## Latest deep audit
+- See `docs/IMPLEMENTATIE_AUDIT_2026-04-17.md` for a detailed done-vs-open analysis, including Windows 11 + macOS readiness.
+
+
 ## What is complete in this repository
 
 ### Core planner
@@ -7,9 +11,12 @@
 - N-up planning
 - booklet planning with signature normalization
 - step-and-repeat planning
+- manual sequence planning (explicit page shuffle order)
+- tile planning with configurable overlap grid
 - page filtering (all/even/odd)
 - reverse order
 - blank padding
+- explicit page-sequence overrides (duplicates/blanks/custom order)
 - fit-to-slot metadata
 - auto-rotate metadata
 - plan statistics and validation helpers
@@ -20,6 +27,7 @@
 ### CLI / prototype
 - build plans from the command line
 - load and save presets
+- presets now store tile overlap + manual/explicit page sequences
 - emit JSON, XML audit, and visual proof PDF output
 - emit human summary and validation report
 - inspect source page usage and placement reverse lookup

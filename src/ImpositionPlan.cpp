@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <limits>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace aimp {
@@ -89,17 +90,39 @@ std::string EscapeJson(const std::string& input) {
 
 std::vector<std::uint32_t> BuildSourcePages(std::uint32_t pageCount, const BuildOptions& options) {
     std::vector<std::uint32_t> pages;
-    pages.reserve(pageCount);
+    if (!options.explicitPageSequence.empty()) {
+        pages.reserve(options.explicitPageSequence.size());
+        for (const auto pageIndex : options.explicitPageSequence) {
+            if (pageIndex == kBlankPageIndex || pageIndex < pageCount) {
+                pages.push_back(pageIndex);
+            } else {
+                pages.push_back(kBlankPageIndex);
+            }
+        }
+    } else {
+        pages.reserve(pageCount);
+        for (std::uint32_t idx = 0; idx < pageCount; ++idx) {
+            pages.push_back(idx);
+        }
+    }
 
-    for (std::uint32_t idx = 0; idx < pageCount; ++idx) {
-        const std::uint32_t humanPage = idx + 1;
-        if (options.filter == PageFilter::EvenOnly && (humanPage % 2u) != 0u) {
-            continue;
+    if (options.filter != PageFilter::All) {
+        std::vector<std::uint32_t> filtered;
+        filtered.reserve(pages.size());
+        for (const auto pageIndex : pages) {
+            if (pageIndex == kBlankPageIndex) {
+                filtered.push_back(pageIndex);
+                continue;
+            }
+            const std::uint32_t humanPage = pageIndex + 1u;
+            if (options.filter == PageFilter::EvenOnly && (humanPage % 2u) == 0u) {
+                filtered.push_back(pageIndex);
+            }
+            if (options.filter == PageFilter::OddOnly && (humanPage % 2u) != 0u) {
+                filtered.push_back(pageIndex);
+            }
         }
-        if (options.filter == PageFilter::OddOnly && (humanPage % 2u) == 0u) {
-            continue;
-        }
-        pages.push_back(idx);
+        pages = std::move(filtered);
     }
 
     if (options.reverseOrder) {
@@ -410,6 +433,117 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
     return plan;
 }
 
+ImpositionPlan ManualPlanner::Build(const std::string& sourceDocumentId,
+                                    std::uint32_t pageCount,
+                                    const SheetSize& outputSheet,
+                                    std::uint32_t columns,
+                                    std::uint32_t rows,
+                                    const std::vector<std::uint32_t>& orderedPages,
+                                    const BuildOptions& options) {
+    ImpositionPlan plan {};
+    plan.mode = LayoutMode::Manual;
+    plan.outputSheet = outputSheet;
+    plan.sourcePageCount = pageCount;
+
+    if (pageCount == 0 || IsInvalidSheet(outputSheet) || columns == 0 || rows == 0 || orderedPages.empty()) {
+        return plan;
+    }
+
+    plan.paddedPageCount = static_cast<std::uint32_t>(orderedPages.size());
+
+    const double slotWidth = outputSheet.widthPoints / static_cast<double>(columns);
+    const double slotHeight = outputSheet.heightPoints / static_cast<double>(rows);
+    const std::uint32_t slotsPerSheet = columns * rows;
+
+    for (std::size_t i = 0; i < orderedPages.size(); ++i) {
+        const std::uint32_t sheetIndex = static_cast<std::uint32_t>(i) / slotsPerSheet;
+        const std::uint32_t slotIndex = static_cast<std::uint32_t>(i) % slotsPerSheet;
+        const std::uint32_t col = slotIndex % columns;
+        const std::uint32_t row = slotIndex / columns;
+        const std::uint32_t sourcePageIndex = orderedPages[i];
+
+        SlotPlacement placement {};
+        placement.sheetIndex = sheetIndex;
+        placement.slotIndex = slotIndex;
+        if (sourcePageIndex == kBlankPageIndex || sourcePageIndex >= pageCount) {
+            placement.sourcePage = PageRef {"", kBlankPageIndex};
+        } else {
+            placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
+        }
+        const Rect slotRect {
+            slotWidth * static_cast<double>(col),
+            slotHeight * static_cast<double>(row),
+            slotWidth,
+            slotHeight
+        };
+        const auto geometry = BuildPlacementGeometry(slotRect, options);
+        placement.targetRect = geometry.rect;
+        placement.rotationDegrees = geometry.rotationDegrees;
+        placement.scale = geometry.scale;
+        plan.placements.push_back(placement);
+    }
+
+    return plan;
+}
+
+ImpositionPlan TilePlanner::Build(const std::string& sourceDocumentId,
+                                  std::uint32_t pageCount,
+                                  const SheetSize& outputSheet,
+                                  const TileConfig& config,
+                                  const BuildOptions& options) {
+    ImpositionPlan plan {};
+    plan.mode = LayoutMode::Tile;
+    plan.outputSheet = outputSheet;
+    plan.sourcePageCount = pageCount;
+
+    if (pageCount == 0 || IsInvalidSheet(outputSheet) || config.columns == 0 || config.rows == 0 || config.overlapPoints < 0.0) {
+        return plan;
+    }
+
+    const auto sourcePages = BuildSourcePages(pageCount, options);
+    if (sourcePages.empty()) {
+        return plan;
+    }
+    plan.paddedPageCount = static_cast<std::uint32_t>(sourcePages.size());
+
+    const double denomX = static_cast<double>(config.columns);
+    const double denomY = static_cast<double>(config.rows);
+    const double slotWidth = (outputSheet.widthPoints + config.overlapPoints * static_cast<double>(config.columns - 1u)) / denomX;
+    const double slotHeight = (outputSheet.heightPoints + config.overlapPoints * static_cast<double>(config.rows - 1u)) / denomY;
+    if (slotWidth <= 0.0 || slotHeight <= 0.0 || slotWidth < config.overlapPoints || slotHeight < config.overlapPoints) {
+        return plan;
+    }
+
+    for (std::size_t sourcePos = 0; sourcePos < sourcePages.size(); ++sourcePos) {
+        const std::uint32_t sourcePageIndex = sourcePages[sourcePos];
+        for (std::uint32_t row = 0; row < config.rows; ++row) {
+            for (std::uint32_t col = 0; col < config.columns; ++col) {
+                SlotPlacement placement {};
+                placement.sheetIndex = static_cast<std::uint32_t>(sourcePos);
+                placement.slotIndex = row * config.columns + col;
+                if (sourcePageIndex == kBlankPageIndex) {
+                    placement.sourcePage = PageRef {"", kBlankPageIndex};
+                } else {
+                    placement.sourcePage = PageRef {sourceDocumentId, sourcePageIndex};
+                }
+                const Rect slotRect {
+                    static_cast<double>(col) * (slotWidth - config.overlapPoints),
+                    static_cast<double>(row) * (slotHeight - config.overlapPoints),
+                    slotWidth,
+                    slotHeight
+                };
+                const auto geometry = BuildPlacementGeometry(slotRect, options);
+                placement.targetRect = geometry.rect;
+                placement.rotationDegrees = geometry.rotationDegrees;
+                placement.scale = geometry.scale;
+                plan.placements.push_back(placement);
+            }
+        }
+    }
+
+    return plan;
+}
+
 const char* LayoutModeName(LayoutMode mode) {
     switch (mode) {
         case LayoutMode::TwoUp: return "two-up";
@@ -549,9 +683,6 @@ std::vector<ValidationIssue> ValidatePlan(const ImpositionPlan& plan) {
     std::vector<ValidationIssue> issues;
     if (plan.outputSheet.widthPoints <= 0.0 || plan.outputSheet.heightPoints <= 0.0) {
         issues.push_back({"invalid-sheet", "Output sheet dimensions must be positive."});
-    }
-    if (plan.paddedPageCount < plan.sourcePageCount) {
-        issues.push_back({"invalid-padding", "Padded page count cannot be smaller than source page count."});
     }
 
     for (const auto& placement : plan.placements) {

@@ -7,7 +7,9 @@
 #include <charconv>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -18,7 +20,9 @@ void PrintUsage() {
         << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
         << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--signature-size <N>] [--out <file>]\n"
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--summary 0|1] [--validate 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "  imposr_cli tile --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--tile-overlap <pt>] [--out <file>]\n"
+        << "  imposr_cli manual --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> --manual-sequence <csv>\n"
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--pdf-out <file.pdf>] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--summary 0|1] [--validate 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -32,6 +36,36 @@ bool ParseDouble(const std::string& value, double& output) {
     char* parseEnd = nullptr;
     output = std::strtod(value.c_str(), &parseEnd);
     return parseEnd != value.c_str() && *parseEnd == '\0';
+}
+
+bool ParsePageSequenceCsv(const std::string& csv, std::vector<std::uint32_t>& sequence, std::string& errorMessage) {
+    sequence.clear();
+    std::stringstream stream(csv);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+        if (token.empty()) {
+            errorMessage = "Empty item in page sequence CSV.";
+            return false;
+        }
+
+        std::uint32_t humanPage = 0;
+        if (!ParseUInt(token, humanPage)) {
+            errorMessage = "Invalid page number in page sequence: " + token;
+            return false;
+        }
+
+        if (humanPage == 0) {
+            sequence.push_back(aimp::kBlankPageIndex);
+            continue;
+        }
+        sequence.push_back(humanPage - 1u);
+    }
+
+    if (sequence.empty()) {
+        errorMessage = "Page sequence cannot be empty.";
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -54,6 +88,7 @@ int main(int argc, char** argv) {
     double stepY = 0.0;
     double slotWidth = 0.0;
     double slotHeight = 0.0;
+    double tileOverlap = 0.0;
     std::string outPath;
     std::string auditOutPath;
     std::string pdfOutPath;
@@ -66,6 +101,10 @@ int main(int argc, char** argv) {
     std::string loadPresetPath;
     bool emitSummary = false;
     bool emitValidation = false;
+    std::string manualSequenceCsv;
+    std::vector<std::uint32_t> manualSequence;
+    std::string pageSequenceCsv;
+    std::vector<std::uint32_t> pageSequence;
 
     for (int i = 2; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--load-preset") {
@@ -86,12 +125,16 @@ int main(int argc, char** argv) {
         rows = preset.rows;
         repeatX = preset.repeatX;
         repeatY = preset.repeatY;
+        tileOverlap = preset.tileOverlap;
         stepX = preset.stepX;
         stepY = preset.stepY;
         slotWidth = preset.slotWidth;
         slotHeight = preset.slotHeight;
         buildOptions = preset.buildOptions;
         pdfOptions = preset.pdfOptions;
+        if (!preset.manualSequence.empty() && manualSequenceCsv.empty()) {
+            manualSequence = preset.manualSequence;
+        }
     }
 
     for (int i = 2; i < argc; ++i) {
@@ -252,6 +295,15 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid value for --slot-height\n";
                 return 1;
             }
+        } else if (key == "--manual-sequence") {
+            manualSequenceCsv = value;
+        } else if (key == "--page-sequence") {
+            pageSequenceCsv = value;
+        } else if (key == "--tile-overlap") {
+            if (!ParseDouble(value, tileOverlap)) {
+                std::cerr << "Invalid value for --tile-overlap\n";
+                return 1;
+            }
         } else if (key == "--reverse") {
             std::uint32_t raw = 0;
             if (!ParseUInt(value, raw) || raw > 1) {
@@ -310,6 +362,15 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (!pageSequenceCsv.empty()) {
+        std::string parseError;
+        if (!ParsePageSequenceCsv(pageSequenceCsv, pageSequence, parseError)) {
+            std::cerr << parseError << '\n';
+            return 1;
+        }
+        buildOptions.explicitPageSequence = pageSequence;
+    }
+
     const aimp::SheetSize sheet {sheetWidth, sheetHeight};
     aimp::ImpositionPlan plan {};
     if (mode == "two-up") {
@@ -335,6 +396,36 @@ int main(int argc, char** argv) {
             aimp::Rect {0.0, 0.0, slotWidth, slotHeight}
         };
         plan = aimp::StepAndRepeatPlanner::Build("cli-input", pages, sheet, config, buildOptions);
+    } else if (mode == "manual") {
+        if (columns == 0 || rows == 0) {
+            std::cerr << "manual mode requires --columns and --rows\n";
+            return 1;
+        }
+        if (manualSequenceCsv.empty()) {
+            if (manualSequence.empty()) {
+                std::cerr << "manual mode requires --manual-sequence (or a preset containing manualSequence)\n";
+                return 1;
+            }
+        }
+        if (!manualSequenceCsv.empty()) {
+            std::string parseError;
+            if (!ParsePageSequenceCsv(manualSequenceCsv, manualSequence, parseError)) {
+                std::cerr << parseError << '\n';
+                return 1;
+            }
+        }
+        plan = aimp::ManualPlanner::Build("cli-input", pages, sheet, columns, rows, manualSequence, buildOptions);
+    } else if (mode == "tile") {
+        if (columns == 0 || rows == 0) {
+            std::cerr << "tile mode requires --columns and --rows\n";
+            return 1;
+        }
+        if (tileOverlap < 0.0) {
+            std::cerr << "--tile-overlap must be >= 0\n";
+            return 1;
+        }
+        const aimp::TileConfig config {columns, rows, tileOverlap};
+        plan = aimp::TilePlanner::Build("cli-input", pages, sheet, config, buildOptions);
     } else {
         std::cerr << "Unknown mode: " << mode << '\n';
         PrintUsage();
@@ -375,12 +466,14 @@ int main(int argc, char** argv) {
         preset.sheetSize = sheet;
         preset.columns = columns;
         preset.rows = rows;
+        preset.tileOverlap = tileOverlap;
         preset.repeatX = repeatX;
         preset.repeatY = repeatY;
         preset.stepX = stepX;
         preset.stepY = stepY;
         preset.slotWidth = slotWidth;
         preset.slotHeight = slotHeight;
+        preset.manualSequence = manualSequence;
         preset.buildOptions = buildOptions;
         preset.pdfOptions = pdfOptions;
         std::string error;

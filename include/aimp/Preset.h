@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "aimp/ImpositionPlan.h"
 #include "aimp/PdfComposer.h"
@@ -11,12 +12,14 @@ struct PlannerPreset {
     SheetSize sheetSize;
     std::uint32_t columns {0};
     std::uint32_t rows {0};
+    double tileOverlap {0.0};
     std::uint32_t repeatX {0};
     std::uint32_t repeatY {0};
     double stepX {0.0};
     double stepY {0.0};
     double slotWidth {0.0};
     double slotHeight {0.0};
+    std::vector<std::uint32_t> manualSequence;
     BuildOptions buildOptions;
     PdfComposeOptions pdfOptions;
 };

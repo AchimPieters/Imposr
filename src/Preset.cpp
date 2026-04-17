@@ -3,8 +3,10 @@
 #include <charconv>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace aimp {
 
@@ -77,6 +79,46 @@ bool RequireKey(const std::unordered_map<std::string, std::string>& values,
     return true;
 }
 
+std::string SerializePageSequence(const std::vector<std::uint32_t>& sequence) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < sequence.size(); ++i) {
+        if (i > 0) {
+            out << ',';
+        }
+        if (sequence[i] == kBlankPageIndex) {
+            out << '0';
+        } else {
+            out << (sequence[i] + 1u);
+        }
+    }
+    return out.str();
+}
+
+bool ParsePageSequence(const std::string& csv, std::vector<std::uint32_t>& sequence) {
+    sequence.clear();
+    if (csv.empty()) {
+        return true;
+    }
+
+    std::stringstream stream(csv);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+        if (token.empty()) {
+            return false;
+        }
+        std::uint32_t value = 0;
+        if (!ParseUInt(token, value)) {
+            return false;
+        }
+        if (value == 0) {
+            sequence.push_back(kBlankPageIndex);
+        } else {
+            sequence.push_back(value - 1u);
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 bool SavePreset(const PlannerPreset& preset, const std::string& path, std::string& errorMessage) {
@@ -90,6 +132,7 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "sheetHeight=" << preset.sheetSize.heightPoints << '\n';
     out << "columns=" << preset.columns << '\n';
     out << "rows=" << preset.rows << '\n';
+    out << "tileOverlap=" << preset.tileOverlap << '\n';
     out << "repeatX=" << preset.repeatX << '\n';
     out << "repeatY=" << preset.repeatY << '\n';
     out << "stepX=" << preset.stepX << '\n';
@@ -100,6 +143,8 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "filter=" << FilterToString(preset.buildOptions.filter) << '\n';
     out << "padMultiple=" << preset.buildOptions.padToMultiple << '\n';
     out << "bookletSignatureSize=" << preset.buildOptions.bookletSignatureSize << '\n';
+    out << "explicitPageSequence=" << SerializePageSequence(preset.buildOptions.explicitPageSequence) << '\n';
+    out << "manualSequence=" << SerializePageSequence(preset.manualSequence) << '\n';
     out << "scaleToFit=" << (preset.buildOptions.scaleToFit ? 1 : 0) << '\n';
     out << "autoRotateToFit=" << (preset.buildOptions.autoRotateToFit ? 1 : 0) << '\n';
     out << "sourcePageWidth=" << preset.buildOptions.sourcePageWidthPoints << '\n';
@@ -154,6 +199,11 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     if (!RequireKey(values, "sheetHeight", raw) || !ParseDouble(raw, preset.sheetSize.heightPoints)) return fail("sheetHeight");
     if (!RequireKey(values, "columns", raw) || !ParseUInt(raw, preset.columns)) return fail("columns");
     if (!RequireKey(values, "rows", raw) || !ParseUInt(raw, preset.rows)) return fail("rows");
+    if (RequireKey(values, "tileOverlap", raw)) {
+        if (!ParseDouble(raw, preset.tileOverlap)) return fail("tileOverlap");
+    } else {
+        preset.tileOverlap = 0.0;
+    }
     if (!RequireKey(values, "repeatX", raw) || !ParseUInt(raw, preset.repeatX)) return fail("repeatX");
     if (!RequireKey(values, "repeatY", raw) || !ParseUInt(raw, preset.repeatY)) return fail("repeatY");
     if (!RequireKey(values, "stepX", raw) || !ParseDouble(raw, preset.stepX)) return fail("stepX");
@@ -165,6 +215,16 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         if (!ParseUInt(raw, preset.buildOptions.bookletSignatureSize)) return fail("bookletSignatureSize");
     } else {
         preset.buildOptions.bookletSignatureSize = 0;
+    }
+    if (RequireKey(values, "explicitPageSequence", raw)) {
+        if (!ParsePageSequence(raw, preset.buildOptions.explicitPageSequence)) return fail("explicitPageSequence");
+    } else {
+        preset.buildOptions.explicitPageSequence.clear();
+    }
+    if (RequireKey(values, "manualSequence", raw)) {
+        if (!ParsePageSequence(raw, preset.manualSequence)) return fail("manualSequence");
+    } else {
+        preset.manualSequence.clear();
     }
     if (RequireKey(values, "scaleToFit", raw)) {
         if (!ParseBool(raw, preset.buildOptions.scaleToFit)) return fail("scaleToFit");
