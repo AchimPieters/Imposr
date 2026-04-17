@@ -1,0 +1,46 @@
+Start testing: Apr 17 15:38 UTC
+----------------------------------------------------------
+1/2 Testing: aimp_planner_tests
+1/2 Test: aimp_planner_tests
+Command: "/mnt/data/imposr/Imposr/build/aimp_planner_tests"
+Directory: /mnt/data/imposr/Imposr/build
+"aimp_planner_tests" start time: Apr 17 15:38 UTC
+Output:
+----------------------------------------------------------
+All planner checks passed.
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"aimp_planner_tests" end time: Apr 17 15:38 UTC
+"aimp_planner_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/2 Testing: imposr_cli_smoke
+2/2 Test: imposr_cli_smoke
+Command: "/mnt/data/imposr/Imposr/build/imposr_cli" "two-up" "--pages" "4" "--sheet-width" "1000" "--sheet-height" "700"
+Directory: /mnt/data/imposr/Imposr/build
+"imposr_cli_smoke" start time: Apr 17 15:38 UTC
+Output:
+----------------------------------------------------------
+{
+  "mode": "two-up",
+  "sourcePageCount": 4,
+  "paddedPageCount": 4,
+  "outputSheet": {"widthPoints": 1000, "heightPoints": 700},
+  "placements": [
+    {"sheetIndex": 0, "slotIndex": 0, "source": {"documentId": "cli-input", "pageIndex": 0}, "targetRect": {"x": 0, "y": 0, "width": 500, "height": 700}, "rotationDegrees": 0, "scale": 1},
+    {"sheetIndex": 0, "slotIndex": 1, "source": {"documentId": "cli-input", "pageIndex": 1}, "targetRect": {"x": 500, "y": 0, "width": 500, "height": 700}, "rotationDegrees": 0, "scale": 1},
+    {"sheetIndex": 1, "slotIndex": 0, "source": {"documentId": "cli-input", "pageIndex": 2}, "targetRect": {"x": 0, "y": 0, "width": 500, "height": 700}, "rotationDegrees": 0, "scale": 1},
+    {"sheetIndex": 1, "slotIndex": 1, "source": {"documentId": "cli-input", "pageIndex": 3}, "targetRect": {"x": 500, "y": 0, "width": 500, "height": 700}, "rotationDegrees": 0, "scale": 1}
+  ]
+}
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"imposr_cli_smoke" end time: Apr 17 15:38 UTC
+"imposr_cli_smoke" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Apr 17 15:38 UTC

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -509,6 +510,87 @@ bool TryGetSourceForPlacement(const ImpositionPlan& plan,
         }
     }
     return false;
+}
+
+
+PlanStatistics ComputePlanStatistics(const ImpositionPlan& plan) {
+    PlanStatistics stats {};
+    stats.placementCount = static_cast<std::uint32_t>(plan.placements.size());
+    stats.sheetCount = plan.placements.empty() ? 0u : 1u;
+    double minX = std::numeric_limits<double>::max();
+    double minY = std::numeric_limits<double>::max();
+    double maxX = std::numeric_limits<double>::lowest();
+    double maxY = std::numeric_limits<double>::lowest();
+
+    for (const auto& placement : plan.placements) {
+        stats.sheetCount = std::max(stats.sheetCount, placement.sheetIndex + 1u);
+        const bool isBlank = placement.sourcePage.pageIndex == kBlankPageIndex;
+        if (isBlank) {
+            ++stats.blankPlacementCount;
+        } else {
+            ++stats.nonBlankPlacementCount;
+        }
+        minX = std::min(minX, placement.targetRect.x);
+        minY = std::min(minY, placement.targetRect.y);
+        maxX = std::max(maxX, placement.targetRect.x + placement.targetRect.width);
+        maxY = std::max(maxY, placement.targetRect.y + placement.targetRect.height);
+    }
+
+    if (!plan.placements.empty()) {
+        stats.minX = minX;
+        stats.minY = minY;
+        stats.maxX = maxX;
+        stats.maxY = maxY;
+    }
+    return stats;
+}
+
+std::vector<ValidationIssue> ValidatePlan(const ImpositionPlan& plan) {
+    std::vector<ValidationIssue> issues;
+    if (plan.outputSheet.widthPoints <= 0.0 || plan.outputSheet.heightPoints <= 0.0) {
+        issues.push_back({"invalid-sheet", "Output sheet dimensions must be positive."});
+    }
+    if (plan.paddedPageCount < plan.sourcePageCount) {
+        issues.push_back({"invalid-padding", "Padded page count cannot be smaller than source page count."});
+    }
+
+    for (const auto& placement : plan.placements) {
+        if (placement.targetRect.width <= 0.0 || placement.targetRect.height <= 0.0) {
+            issues.push_back({"invalid-rect", "Placement has a non-positive target rectangle."});
+        }
+        if (placement.targetRect.x < 0.0 || placement.targetRect.y < 0.0 ||
+            placement.targetRect.x + placement.targetRect.width > plan.outputSheet.widthPoints + 0.01 ||
+            placement.targetRect.y + placement.targetRect.height > plan.outputSheet.heightPoints + 0.01) {
+            issues.push_back({"out-of-bounds", "Placement falls outside the output sheet."});
+        }
+        if (placement.sourcePage.pageIndex != kBlankPageIndex &&
+            placement.sourcePage.pageIndex >= plan.sourcePageCount) {
+            issues.push_back({"invalid-source-page", "Placement references a source page index beyond the document size."});
+        }
+    }
+    return issues;
+}
+
+std::string BuildHumanSummary(const ImpositionPlan& plan) {
+    const auto stats = ComputePlanStatistics(plan);
+    const auto issues = ValidatePlan(plan);
+
+    std::ostringstream out;
+    out << "mode=" << LayoutModeName(plan.mode)
+        << ", sourcePages=" << plan.sourcePageCount
+        << ", paddedPages=" << plan.paddedPageCount
+        << ", placements=" << stats.placementCount
+        << ", sheets=" << stats.sheetCount
+        << ", blanks=" << stats.blankPlacementCount;
+
+    if (!plan.placements.empty()) {
+        out << ", bounds=(" << stats.minX << "," << stats.minY
+            << ")-(" << stats.maxX << "," << stats.maxY << ")";
+    }
+    if (!issues.empty()) {
+        out << ", validationIssues=" << issues.size();
+    }
+    return out.str();
 }
 
 } // namespace aimp

@@ -193,6 +193,22 @@ int main() {
     }
 
     {
+        const auto plan = aimp::BookletPlanner::Build("doc", 7, {1000.0, 700.0});
+        const auto stats = aimp::ComputePlanStatistics(plan);
+        if (stats.sheetCount != 4 || stats.blankPlacementCount != 1 || stats.nonBlankPlacementCount != 7) {
+            return Fail("ComputePlanStatistics should report expected sheet and blank counts.");
+        }
+        const auto issues = aimp::ValidatePlan(plan);
+        if (!issues.empty()) {
+            return Fail("ValidatePlan should accept a valid planner output.");
+        }
+        const auto summary = aimp::BuildHumanSummary(plan);
+        if (summary.find("mode=booklet") == std::string::npos || summary.find("sheets=4") == std::string::npos) {
+            return Fail("BuildHumanSummary should include mode and sheet count.");
+        }
+    }
+
+    {
         const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
         std::string error;
         const std::string outputPath = "/tmp/aimp_test_output.pdf";

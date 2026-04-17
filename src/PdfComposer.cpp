@@ -1,8 +1,9 @@
 #include "aimp/PdfComposer.h"
 
-#include <cstdio>
 #include <algorithm>
+#include <cstdio>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <vector>
 
@@ -30,6 +31,41 @@ std::size_t SheetCount(const ImpositionPlan& plan) {
     return plan.placements.empty() ? 1 : maxSheet + 1;
 }
 
+void StrokeRect(std::ostringstream& content, const Rect& rect) {
+    content << rect.x << ' ' << rect.y << ' ' << rect.width << ' ' << rect.height << " re S\n";
+}
+
+void FillRect(std::ostringstream& content, const Rect& rect) {
+    content << rect.x << ' ' << rect.y << ' ' << rect.width << ' ' << rect.height << " re f\n";
+}
+
+void DrawCrosshair(std::ostringstream& content, double x, double y, double size) {
+    content << x - size << ' ' << y << " m " << x + size << ' ' << y << " l S\n";
+    content << x << ' ' << y - size << " m " << x << ' ' << y + size << " l S\n";
+}
+
+std::string FormatPlacementLabel(const SlotPlacement& placement,
+                                 const PdfComposeOptions& options,
+                                 std::uint32_t& batesCounter) {
+    std::ostringstream line;
+    line << "slot " << placement.slotIndex << " • ";
+    if (placement.sourcePage.pageIndex == kBlankPageIndex) {
+        line << "blank";
+    } else {
+        line << placement.sourcePage.sourceDocumentId << " p" << (placement.sourcePage.pageIndex + 1u);
+    }
+    if (placement.rotationDegrees != 0.0) {
+        line << " • rot=" << placement.rotationDegrees;
+    }
+    if (placement.scale != 1.0) {
+        line << " • scale=" << std::fixed << std::setprecision(3) << placement.scale;
+    }
+    if (options.includeBates) {
+        line << " • " << options.batesPrefix << batesCounter++;
+    }
+    return line.str();
+}
+
 } // namespace
 
 bool ComposePlanPdf(const ImpositionPlan& plan,
@@ -46,8 +82,6 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
     const double pageHeight = plan.outputSheet.heightPoints > 0.0 ? plan.outputSheet.heightPoints : 842.0;
     const std::size_t sheetCount = SheetCount(plan);
 
-    // Object numbering:
-    // 1 catalog, 2 pages, 3 font, then page/content pairs.
     const int fontObj = 3;
     const int firstPageObj = 4;
     const int objectCount = 3 + static_cast<int>(sheetCount) * 2;
@@ -63,35 +97,63 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
         pageObjectIds.push_back(pageObj);
 
         std::ostringstream content;
+        content << "q\n";
+        if (options.drawSheetBorder) {
+            content << "0.2 w\n0 0 0 RG\n";
+            StrokeRect(content, Rect {18.0, 18.0, pageWidth - 36.0, pageHeight - 36.0});
+        }
+
         if (!options.headerText.empty()) {
             content << "BT /F1 12 Tf 36 " << (pageHeight - 24.0) << " Td (" << EscapePdfText(options.headerText) << ") Tj ET\n";
         }
         if (options.includeSheetNumber) {
-            content << "BT /F1 14 Tf 36 " << (pageHeight - 40.0) << " Td (Imposition sheet " << sheet << ") Tj ET\n";
+            content << "BT /F1 14 Tf 36 " << (pageHeight - 42.0) << " Td (Imposition sheet " << (sheet + 1u) << ") Tj ET\n";
         }
-        double y = pageHeight - 70.0;
+        content << "BT /F1 10 Tf 36 " << (pageHeight - 58.0) << " Td (" << EscapePdfText(BuildHumanSummary(plan)) << ") Tj ET\n";
+
         for (const auto& placement : plan.placements) {
             if (placement.sheetIndex != sheet) {
                 continue;
             }
-            std::ostringstream line;
-            line << "slot=" << placement.slotIndex
-                 << " srcDoc=" << placement.sourcePage.sourceDocumentId
-                 << " srcPage=" << placement.sourcePage.pageIndex
-                 << " rect=(" << placement.targetRect.x << "," << placement.targetRect.y
-                 << "," << placement.targetRect.width << "," << placement.targetRect.height << ")";
-            if (options.includeBates) {
-                line << " bates=" << options.batesPrefix << batesCounter++;
+
+            if (options.drawSlotOutlines) {
+                if (placement.sourcePage.pageIndex == kBlankPageIndex) {
+                    content << "0.70 0.70 0.70 RG 0.95 0.95 0.95 rg\n";
+                    FillRect(content, placement.targetRect);
+                    content << "0.55 0.55 0.55 RG\n";
+                } else {
+                    content << "0.12 0.12 0.12 RG\n";
+                }
+                content << "0.75 w\n";
+                StrokeRect(content, placement.targetRect);
             }
-            content << "BT /F1 10 Tf 36 " << y << " Td (" << EscapePdfText(line.str()) << ") Tj ET\n";
-            y -= 14.0;
-            if (y < 36.0) {
-                break;
+
+            if (options.drawCenterMarks) {
+                content << "0.35 w\n";
+                DrawCrosshair(content,
+                              placement.targetRect.x + placement.targetRect.width / 2.0,
+                              placement.targetRect.y + placement.targetRect.height / 2.0,
+                              8.0);
+            }
+
+            if (options.drawSlotLabels) {
+                const auto label = FormatPlacementLabel(placement, options, batesCounter);
+                const double labelY = std::max(placement.targetRect.y + placement.targetRect.height - 14.0, 24.0);
+                content << "BT /F1 9 Tf " << (placement.targetRect.x + 6.0) << ' ' << labelY
+                        << " Td (" << EscapePdfText(label) << ") Tj ET\n";
+                std::ostringstream rectLine;
+                rectLine << "rect=(" << std::fixed << std::setprecision(1)
+                         << placement.targetRect.x << ',' << placement.targetRect.y << ','
+                         << placement.targetRect.width << ',' << placement.targetRect.height << ')';
+                content << "BT /F1 8 Tf " << (placement.targetRect.x + 6.0) << ' ' << std::max(labelY - 11.0, 16.0)
+                        << " Td (" << EscapePdfText(rectLine.str()) << ") Tj ET\n";
             }
         }
+
         if (!options.footerText.empty()) {
             content << "BT /F1 10 Tf 36 24 Td (" << EscapePdfText(options.footerText) << ") Tj ET\n";
         }
+        content << "Q\n";
 
         const std::string contentData = content.str();
         std::ostringstream contentObjData;
@@ -100,7 +162,7 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
         objects[contentObj] = contentObjData.str();
 
         std::ostringstream pageObjData;
-        pageObjData << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " << pageWidth << " " << pageHeight << "] "
+        pageObjData << "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " << pageWidth << ' ' << pageHeight << "] "
                     << "/Resources << /Font << /F1 " << fontObj << " 0 R >> >> "
                     << "/Contents " << contentObj << " 0 R >>\n";
         objects[pageObj] = pageObjData.str();

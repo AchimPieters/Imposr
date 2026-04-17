@@ -62,6 +62,22 @@ struct ImpositionPlan {
     std::uint32_t paddedPageCount {0};
 };
 
+struct PlanStatistics {
+    std::uint32_t sheetCount {0};
+    std::uint32_t placementCount {0};
+    std::uint32_t blankPlacementCount {0};
+    std::uint32_t nonBlankPlacementCount {0};
+    double minX {0.0};
+    double minY {0.0};
+    double maxX {0.0};
+    double maxY {0.0};
+};
+
+struct ValidationIssue {
+    std::string code;
+    std::string message;
+};
+
 struct StepRepeatConfig {
     std::uint32_t repeatX {1};
     std::uint32_t repeatY {1};
@@ -126,5 +142,8 @@ bool TryGetSourceForPlacement(const ImpositionPlan& plan,
                               std::uint32_t sheetIndex,
                               std::uint32_t slotIndex,
                               PageRef& outSourcePage);
+PlanStatistics ComputePlanStatistics(const ImpositionPlan& plan);
+std::vector<ValidationIssue> ValidatePlan(const ImpositionPlan& plan);
+std::string BuildHumanSummary(const ImpositionPlan& plan);
 
 } // namespace aimp
