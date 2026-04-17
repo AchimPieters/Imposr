@@ -86,11 +86,18 @@ struct StepRepeatConfig {
     Rect seedRect;
 };
 
+struct TileConfig {
+    std::uint32_t columns {1};
+    std::uint32_t rows {1};
+    double overlapPoints {0.0};
+};
+
 struct BuildOptions {
     bool reverseOrder {false};
     PageFilter filter {PageFilter::All};
     std::uint32_t padToMultiple {0};
     std::uint32_t bookletSignatureSize {0};
+    std::vector<std::uint32_t> explicitPageSequence;
     bool scaleToFit {false};
     bool autoRotateToFit {false};
     double sourcePageWidthPoints {0.0};
@@ -129,6 +136,26 @@ public:
                                 std::uint32_t pageCount,
                                 const SheetSize& outputSheet,
                                 const StepRepeatConfig& config,
+                                const BuildOptions& options = {});
+};
+
+class ManualPlanner {
+public:
+    static ImpositionPlan Build(const std::string& sourceDocumentId,
+                                std::uint32_t pageCount,
+                                const SheetSize& outputSheet,
+                                std::uint32_t columns,
+                                std::uint32_t rows,
+                                const std::vector<std::uint32_t>& orderedPages,
+                                const BuildOptions& options = {});
+};
+
+class TilePlanner {
+public:
+    static ImpositionPlan Build(const std::string& sourceDocumentId,
+                                std::uint32_t pageCount,
+                                const SheetSize& outputSheet,
+                                const TileConfig& config,
                                 const BuildOptions& options = {});
 };
 
