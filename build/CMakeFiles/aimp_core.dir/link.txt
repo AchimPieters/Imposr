@@ -1,2 +1,0 @@
-/usr/bin/ar qc libaimp_core.a CMakeFiles/aimp_core.dir/src/ImpositionPlan.cpp.o CMakeFiles/aimp_core.dir/src/PdfComposer.cpp.o CMakeFiles/aimp_core.dir/src/Preset.cpp.o
-/usr/bin/ranlib libaimp_core.a

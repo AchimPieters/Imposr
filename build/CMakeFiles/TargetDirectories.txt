@@ -1,6 +1,0 @@
-/mnt/data/imposr/Imposr/build/CMakeFiles/aimp_core.dir
-/mnt/data/imposr/Imposr/build/CMakeFiles/imposr_cli.dir
-/mnt/data/imposr/Imposr/build/CMakeFiles/aimp_planner_tests.dir
-/mnt/data/imposr/Imposr/build/CMakeFiles/test.dir
-/mnt/data/imposr/Imposr/build/CMakeFiles/edit_cache.dir
-/mnt/data/imposr/Imposr/build/CMakeFiles/rebuild_cache.dir
