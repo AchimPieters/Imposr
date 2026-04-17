@@ -26,6 +26,12 @@ At this point, Git will stop on conflicts.
 
 > **Permanent recommendation:** use this command-line flow for this repository instead of the GitHub web conflict editor.
 
+Shortcut script:
+
+```bash
+./scripts/resolve_pr_conflicts_local.sh <feature-branch> [base-branch]
+```
+
 ### 1) Inspect conflict status
 
 ```bash
