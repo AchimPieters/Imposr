@@ -31,6 +31,7 @@
 - draws slot outlines
 - marks blank slots
 - prints placement labels, geometry, and optional Bates numbering
+- supports optional trim-mark and bleed-box visualization for prepress proofing
 - suitable for validating planner geometry without Acrobat SDK dependencies
 
 ## What is not complete yet
@@ -53,6 +54,14 @@
 - compile and load the plug-in with the target Acrobat SDK on Windows 11
 - compile and load the plug-in with the target Acrobat SDK on macOS
 - verify menu actions, temp-file export, and document lifecycle handling
+- add a shared compatibility matrix (Acrobat version x OS x CPU architecture) and keep it updated per release
+
+### Cross-platform guardrails (Windows 11 + macOS)
+- enforce a thin platform abstraction for filesystem paths, temp directories, and UI wiring
+- keep planner/composer logic free of OS-specific code; only host glue may be platform-specific
+- validate on both platforms in CI (planner/composer/tests) and in manual Acrobat smoke tests (plugin load + menu action)
+- maintain separate build presets/toolchains for MSVC (Windows 11) and Clang/Xcode (macOS)
+- ship and test 64-bit targets only for modern Acrobat builds
 
 ### M2 — Real composition
 - import source page content into destination sheets

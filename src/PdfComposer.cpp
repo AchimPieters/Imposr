@@ -44,6 +44,40 @@ void DrawCrosshair(std::ostringstream& content, double x, double y, double size)
     content << x << ' ' << y - size << " m " << x << ' ' << y + size << " l S\n";
 }
 
+void DrawTrimMarks(std::ostringstream& content,
+                   const Rect& rect,
+                   double markLength,
+                   double markOffset) {
+    const double left = rect.x;
+    const double right = rect.x + rect.width;
+    const double bottom = rect.y;
+    const double top = rect.y + rect.height;
+
+    // Left-bottom corner.
+    content << left - markOffset - markLength << ' ' << bottom << " m "
+            << left - markOffset << ' ' << bottom << " l S\n";
+    content << left << ' ' << bottom - markOffset - markLength << " m "
+            << left << ' ' << bottom - markOffset << " l S\n";
+
+    // Left-top corner.
+    content << left - markOffset - markLength << ' ' << top << " m "
+            << left - markOffset << ' ' << top << " l S\n";
+    content << left << ' ' << top + markOffset << " m "
+            << left << ' ' << top + markOffset + markLength << " l S\n";
+
+    // Right-bottom corner.
+    content << right + markOffset << ' ' << bottom << " m "
+            << right + markOffset + markLength << ' ' << bottom << " l S\n";
+    content << right << ' ' << bottom - markOffset - markLength << " m "
+            << right << ' ' << bottom - markOffset << " l S\n";
+
+    // Right-top corner.
+    content << right + markOffset << ' ' << top << " m "
+            << right + markOffset + markLength << ' ' << top << " l S\n";
+    content << right << ' ' << top + markOffset << " m "
+            << right << ' ' << top + markOffset + markLength << " l S\n";
+}
+
 std::string FormatPlacementLabel(const SlotPlacement& placement,
                                  const PdfComposeOptions& options,
                                  std::uint32_t& batesCounter) {
@@ -126,6 +160,28 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
                 }
                 content << "0.75 w\n";
                 StrokeRect(content, placement.targetRect);
+            }
+
+            if (options.drawBleedBox && options.bleedPoints > 0.0) {
+                const Rect bleedRect {
+                    placement.targetRect.x - options.bleedPoints,
+                    placement.targetRect.y - options.bleedPoints,
+                    placement.targetRect.width + options.bleedPoints * 2.0,
+                    placement.targetRect.height + options.bleedPoints * 2.0
+                };
+                content << "% bleed-box\n";
+                content << "0.85 0.05 0.05 RG\n";
+                content << "0.35 w\n";
+                StrokeRect(content, bleedRect);
+            }
+
+            if (options.drawTrimMarks) {
+                const double length = std::max(options.trimMarkLengthPoints, 1.0);
+                const double offset = std::max(options.trimMarkOffsetPoints, 0.0);
+                content << "% trim-marks\n";
+                content << "0.0 0.0 0.0 RG\n";
+                content << "0.45 w\n";
+                DrawTrimMarks(content, placement.targetRect, length, offset);
             }
 
             if (options.drawCenterMarks) {

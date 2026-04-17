@@ -3,6 +3,7 @@
 #include "aimp/Preset.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -12,6 +13,15 @@ namespace {
 int Fail(const char* message) {
     std::cerr << "FAIL: " << message << '\n';
     return EXIT_FAILURE;
+}
+
+std::string BuildTempPath(const std::string& fileName) {
+    std::error_code ec;
+    const auto tempDir = std::filesystem::temp_directory_path(ec);
+    if (!ec) {
+        return (tempDir / fileName).string();
+    }
+    return (std::filesystem::current_path() / fileName).string();
 }
 
 } // namespace
@@ -211,7 +221,7 @@ int main() {
     {
         const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
         std::string error;
-        const std::string outputPath = "/tmp/aimp_test_output.pdf";
+        const std::string outputPath = BuildTempPath("aimp_test_output.pdf");
         aimp::PdfComposeOptions options {};
         options.headerText = "Header Demo";
         options.footerText = "Footer Demo";
@@ -219,6 +229,11 @@ int main() {
         options.includeBates = true;
         options.batesPrefix = "B-";
         options.batesStart = 10;
+        options.drawTrimMarks = true;
+        options.trimMarkLengthPoints = 9.0;
+        options.trimMarkOffsetPoints = 4.0;
+        options.drawBleedBox = true;
+        options.bleedPoints = 6.0;
         if (!aimp::ComposePlanPdf(plan, outputPath, options, error)) {
             return Fail("ComposePlanPdf should generate a PDF file.");
         }
@@ -240,6 +255,9 @@ int main() {
         }
         if (body.find("B-10") == std::string::npos) {
             return Fail("ComposePlanPdf should include Bates numbering when enabled.");
+        }
+        if (body.find("trim-marks") == std::string::npos || body.find("bleed-box") == std::string::npos) {
+            return Fail("ComposePlanPdf should include trim marks and bleed box drawing when enabled.");
         }
     }
 
@@ -268,9 +286,14 @@ int main() {
         preset.pdfOptions.includeBates = true;
         preset.pdfOptions.batesPrefix = "PR-";
         preset.pdfOptions.batesStart = 100;
+        preset.pdfOptions.drawTrimMarks = true;
+        preset.pdfOptions.trimMarkLengthPoints = 8.0;
+        preset.pdfOptions.trimMarkOffsetPoints = 3.0;
+        preset.pdfOptions.drawBleedBox = true;
+        preset.pdfOptions.bleedPoints = 5.0;
 
         std::string error;
-        const std::string presetPath = "/tmp/aimp_test_preset.txt";
+        const std::string presetPath = BuildTempPath("aimp_test_preset.txt");
         if (!aimp::SavePreset(preset, presetPath, error)) {
             return Fail("SavePreset should succeed.");
         }
@@ -301,10 +324,17 @@ int main() {
         if (!loaded.pdfOptions.includeBates || loaded.pdfOptions.batesPrefix != "PR-" || loaded.pdfOptions.batesStart != 100) {
             return Fail("Loaded preset Bates options mismatch.");
         }
+        if (!loaded.pdfOptions.drawTrimMarks ||
+            loaded.pdfOptions.trimMarkLengthPoints != 8.0 ||
+            loaded.pdfOptions.trimMarkOffsetPoints != 3.0 ||
+            !loaded.pdfOptions.drawBleedBox ||
+            loaded.pdfOptions.bleedPoints != 5.0) {
+            return Fail("Loaded preset trim/bleed options mismatch.");
+        }
     }
 
     {
-        const std::string invalidPresetPath = "/tmp/aimp_invalid_preset.txt";
+        const std::string invalidPresetPath = BuildTempPath("aimp_invalid_preset.txt");
         {
             std::ofstream out(invalidPresetPath);
             out << "sheetWidth=abc\n"; // invalid

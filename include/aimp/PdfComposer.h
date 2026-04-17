@@ -18,6 +18,11 @@ struct PdfComposeOptions {
     bool drawSlotOutlines {true};
     bool drawSlotLabels {true};
     bool drawCenterMarks {true};
+    bool drawTrimMarks {false};
+    double trimMarkLengthPoints {12.0};
+    double trimMarkOffsetPoints {6.0};
+    bool drawBleedBox {false};
+    double bleedPoints {0.0};
 };
 
 bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, std::string& errorMessage);
