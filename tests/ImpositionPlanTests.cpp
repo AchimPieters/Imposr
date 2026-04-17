@@ -86,6 +86,7 @@ int main() {
     {
         aimp::BuildOptions options {};
         options.bookletSignatureSize = 8;
+        options.bookletCreepPerSheetPoints = 6.0;
         const auto plan = aimp::BookletPlanner::Build("doc", 10, {1000.0, 700.0}, options);
         if (plan.paddedPageCount != 16) {
             return Fail("Booklet signature sizing should pad each signature to configured size.");
@@ -95,6 +96,13 @@ int main() {
         }
         if (plan.placements[8].sourcePage.pageIndex != aimp::kBlankPageIndex) {
             return Fail("Second signature front-left should be blank when only 2 pages remain.");
+        }
+        // Inner sheet (sheetIndex 2) should have creep adjustment versus outer sheet.
+        if (plan.placements[4].sheetIndex != 2 || plan.placements[4].targetRect.x != 6.0) {
+            return Fail("Booklet creep should shift left slots on inner sheets.");
+        }
+        if (plan.placements[5].sheetIndex != 2 || plan.placements[5].targetRect.x != 494.0) {
+            return Fail("Booklet creep should shift right slots on inner sheets.");
         }
     }
 
@@ -108,6 +116,29 @@ int main() {
         }
         if (json.find("\"mode\": \"two-up\"") == std::string::npos) {
             return Fail("JSON mode should use stable text values.");
+        }
+    }
+
+    {
+        const auto manifest = aimp::ToPlacementManifestJson(aimp::TwoUpPlanner::Build("doc", 1, {1000.0, 700.0}));
+        if (manifest.find("\"ctm\"") == std::string::npos ||
+            manifest.find("\"a\": 500") == std::string::npos ||
+            manifest.find("\"d\": 700") == std::string::npos) {
+            return Fail("Placement manifest should include CTM entries for Acrobat composition handoff.");
+        }
+    }
+
+    {
+        aimp::BuildOptions options {};
+        options.scaleToFit = true;
+        options.autoRotateToFit = true;
+        options.sourcePageWidthPoints = 800.0;
+        options.sourcePageHeightPoints = 400.0;
+        const auto manifest = aimp::ToPlacementManifestJson(aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options));
+        if (manifest.find("\"rotationDegrees\": 90") == std::string::npos ||
+            manifest.find("\"b\": 600") == std::string::npos ||
+            manifest.find("\"c\": -300") == std::string::npos) {
+            return Fail("Placement manifest should encode rotated CTM for 90-degree placement.");
         }
     }
 
@@ -344,6 +375,15 @@ int main() {
         options.trimMarkOffsetPoints = 4.0;
         options.drawBleedBox = true;
         options.bleedPoints = 6.0;
+        options.overlayTemplate = "sheet={{sheet}} slot={{slot}} page={{page}} name={{name}}";
+        const std::string csvPath = BuildTempPath("aimp_test_variables.csv");
+        {
+            std::ofstream csv(csvPath);
+            csv << "page,name\n";
+            csv << "1,Alice\n";
+            csv << "2,Bob\n";
+        }
+        options.variableDataCsvPath = csvPath;
         if (!aimp::ComposePlanPdf(plan, outputPath, options, error)) {
             return Fail("ComposePlanPdf should generate a PDF file.");
         }
@@ -369,6 +409,9 @@ int main() {
         if (body.find("trim-marks") == std::string::npos || body.find("bleed-box") == std::string::npos) {
             return Fail("ComposePlanPdf should include trim marks and bleed box drawing when enabled.");
         }
+        if (body.find("name=Alice") == std::string::npos || body.find("name=Bob") == std::string::npos) {
+            return Fail("ComposePlanPdf should expand overlay template with CSV variables.");
+        }
     }
 
     {
@@ -392,6 +435,7 @@ int main() {
         preset.buildOptions.autoRotateToFit = true;
         preset.buildOptions.sourcePageWidthPoints = 612.0;
         preset.buildOptions.sourcePageHeightPoints = 792.0;
+        preset.buildOptions.bookletCreepPerSheetPoints = 2.5;
         preset.manualSequence = {4, 0, 3, 2, 1};
         preset.pdfOptions.headerText = "Preset Header";
         preset.pdfOptions.footerText = "Preset Footer";
@@ -404,6 +448,8 @@ int main() {
         preset.pdfOptions.trimMarkOffsetPoints = 3.0;
         preset.pdfOptions.drawBleedBox = true;
         preset.pdfOptions.bleedPoints = 5.0;
+        preset.pdfOptions.overlayTemplate = "job={{sheet}}/{{slot}}";
+        preset.pdfOptions.variableDataCsvPath = "vars.csv";
 
         std::string error;
         const std::string presetPath = BuildTempPath("aimp_test_preset.txt");
@@ -449,6 +495,9 @@ int main() {
         if (loaded.buildOptions.sourcePageWidthPoints != 612.0 || loaded.buildOptions.sourcePageHeightPoints != 792.0) {
             return Fail("Loaded preset source page dimensions mismatch.");
         }
+        if (loaded.buildOptions.bookletCreepPerSheetPoints != 2.5) {
+            return Fail("Loaded preset booklet creep mismatch.");
+        }
         if (loaded.pdfOptions.headerText != "Preset Header" || loaded.pdfOptions.includeSheetNumber) {
             return Fail("Loaded preset PDF options mismatch.");
         }
@@ -461,6 +510,10 @@ int main() {
             !loaded.pdfOptions.drawBleedBox ||
             loaded.pdfOptions.bleedPoints != 5.0) {
             return Fail("Loaded preset trim/bleed options mismatch.");
+        }
+        if (loaded.pdfOptions.overlayTemplate != "job={{sheet}}/{{slot}}" ||
+            loaded.pdfOptions.variableDataCsvPath != "vars.csv") {
+            return Fail("Loaded preset overlay/csv options mismatch.");
         }
     }
 

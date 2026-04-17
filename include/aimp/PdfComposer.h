@@ -23,6 +23,8 @@ struct PdfComposeOptions {
     double trimMarkOffsetPoints {6.0};
     bool drawBleedBox {false};
     double bleedPoints {0.0};
+    std::string overlayTemplate;
+    std::string variableDataCsvPath;
 };
 
 bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, std::string& errorMessage);

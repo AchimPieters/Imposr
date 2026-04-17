@@ -1,10 +1,13 @@
 #include "aimp/PdfComposer.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 #include <vector>
 
 namespace aimp {
@@ -100,6 +103,131 @@ std::string FormatPlacementLabel(const SlotPlacement& placement,
     return line.str();
 }
 
+std::vector<std::string> ParseCsvLine(const std::string& line) {
+    std::vector<std::string> fields;
+    std::string current;
+    bool inQuotes = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char ch = line[i];
+        if (ch == '"') {
+            if (inQuotes && i + 1 < line.size() && line[i + 1] == '"') {
+                current.push_back('"');
+                ++i;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+        if (ch == ',' && !inQuotes) {
+            fields.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(ch);
+    }
+    fields.push_back(current);
+    return fields;
+}
+
+std::string TrimAscii(std::string value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.pop_back();
+    }
+    return value;
+}
+
+using VariableMap = std::unordered_map<std::string, std::string>;
+using VariableByPageMap = std::unordered_map<std::uint32_t, VariableMap>;
+
+bool LoadVariableDataCsv(const std::string& path, VariableByPageMap& out, std::string& errorMessage) {
+    out.clear();
+    if (path.empty()) {
+        return true;
+    }
+
+    std::ifstream in(path);
+    if (!in) {
+        errorMessage = "Could not open variable data CSV file";
+        return false;
+    }
+
+    std::string headerLine;
+    if (!std::getline(in, headerLine)) {
+        errorMessage = "Variable data CSV is empty";
+        return false;
+    }
+    const auto headers = ParseCsvLine(headerLine);
+    if (headers.empty()) {
+        errorMessage = "Variable data CSV header is invalid";
+        return false;
+    }
+    if (TrimAscii(headers[0]) != "page") {
+        errorMessage = "Variable data CSV must start with 'page' column";
+        return false;
+    }
+
+    std::string line;
+    std::size_t lineNumber = 1;
+    while (std::getline(in, line)) {
+        ++lineNumber;
+        if (TrimAscii(line).empty()) {
+            continue;
+        }
+        const auto fields = ParseCsvLine(line);
+        if (fields.empty()) {
+            continue;
+        }
+
+        std::uint32_t humanPage = 0;
+        const std::string pageField = TrimAscii(fields[0]);
+        const char* begin = pageField.data();
+        const char* end = pageField.data() + pageField.size();
+        const auto parseResult = std::from_chars(begin, end, humanPage);
+        if (parseResult.ec != std::errc {} || parseResult.ptr != end || humanPage == 0) {
+            errorMessage = "Invalid page value in variable CSV at line " + std::to_string(lineNumber);
+            return false;
+        }
+
+        VariableMap row;
+        for (std::size_t i = 1; i < headers.size(); ++i) {
+            const std::string key = TrimAscii(headers[i]);
+            if (key.empty()) {
+                continue;
+            }
+            const std::string value = i < fields.size() ? TrimAscii(fields[i]) : "";
+            row[key] = value;
+        }
+        out[humanPage - 1u] = row;
+    }
+
+    return true;
+}
+
+std::string ExpandOverlayTemplate(const std::string& templ, const VariableMap& values) {
+    std::string out;
+    out.reserve(templ.size() + 32);
+    for (std::size_t i = 0; i < templ.size();) {
+        if (i + 1 < templ.size() && templ[i] == '{' && templ[i + 1] == '{') {
+            const std::size_t end = templ.find("}}", i + 2);
+            if (end != std::string::npos) {
+                const std::string key = templ.substr(i + 2, end - (i + 2));
+                const auto it = values.find(key);
+                if (it != values.end()) {
+                    out += it->second;
+                }
+                i = end + 2;
+                continue;
+            }
+        }
+        out.push_back(templ[i]);
+        ++i;
+    }
+    return out;
+}
+
 } // namespace
 
 bool ComposePlanPdf(const ImpositionPlan& plan,
@@ -115,6 +243,10 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
     const double pageWidth = plan.outputSheet.widthPoints > 0.0 ? plan.outputSheet.widthPoints : 595.0;
     const double pageHeight = plan.outputSheet.heightPoints > 0.0 ? plan.outputSheet.heightPoints : 842.0;
     const std::size_t sheetCount = SheetCount(plan);
+    VariableByPageMap csvVariables;
+    if (!LoadVariableDataCsv(options.variableDataCsvPath, csvVariables, errorMessage)) {
+        return false;
+    }
 
     const int fontObj = 3;
     const int firstPageObj = 4;
@@ -203,6 +335,29 @@ bool ComposePlanPdf(const ImpositionPlan& plan,
                          << placement.targetRect.width << ',' << placement.targetRect.height << ')';
                 content << "BT /F1 8 Tf " << (placement.targetRect.x + 6.0) << ' ' << std::max(labelY - 11.0, 16.0)
                         << " Td (" << EscapePdfText(rectLine.str()) << ") Tj ET\n";
+            }
+
+            if (!options.overlayTemplate.empty()) {
+                VariableMap variables;
+                variables["sheet"] = std::to_string(placement.sheetIndex + 1u);
+                variables["slot"] = std::to_string(placement.slotIndex);
+                if (placement.sourcePage.pageIndex == kBlankPageIndex) {
+                    variables["page"] = "blank";
+                    variables["doc"] = "";
+                } else {
+                    variables["page"] = std::to_string(placement.sourcePage.pageIndex + 1u);
+                    variables["doc"] = placement.sourcePage.sourceDocumentId;
+                }
+                const auto csvIt = csvVariables.find(placement.sourcePage.pageIndex);
+                if (csvIt != csvVariables.end()) {
+                    for (const auto& pair : csvIt->second) {
+                        variables[pair.first] = pair.second;
+                    }
+                }
+                const std::string overlay = ExpandOverlayTemplate(options.overlayTemplate, variables);
+                const double overlayY = std::max(placement.targetRect.y + 6.0, 14.0);
+                content << "BT /F1 8 Tf " << (placement.targetRect.x + 6.0) << ' ' << overlayY
+                        << " Td (" << EscapePdfText(overlay) << ") Tj ET\n";
             }
         }
 

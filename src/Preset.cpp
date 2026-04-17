@@ -149,6 +149,7 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "autoRotateToFit=" << (preset.buildOptions.autoRotateToFit ? 1 : 0) << '\n';
     out << "sourcePageWidth=" << preset.buildOptions.sourcePageWidthPoints << '\n';
     out << "sourcePageHeight=" << preset.buildOptions.sourcePageHeightPoints << '\n';
+    out << "bookletCreepPerSheet=" << preset.buildOptions.bookletCreepPerSheetPoints << '\n';
     out << "pdfSheetNumber=" << (preset.pdfOptions.includeSheetNumber ? 1 : 0) << '\n';
     out << "pdfHeader=" << preset.pdfOptions.headerText << '\n';
     out << "pdfFooter=" << preset.pdfOptions.footerText << '\n';
@@ -164,6 +165,8 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "pdfTrimMarkOffset=" << preset.pdfOptions.trimMarkOffsetPoints << '\n';
     out << "pdfDrawBleedBox=" << (preset.pdfOptions.drawBleedBox ? 1 : 0) << '\n';
     out << "pdfBleedPoints=" << preset.pdfOptions.bleedPoints << '\n';
+    out << "pdfOverlayTemplate=" << preset.pdfOptions.overlayTemplate << '\n';
+    out << "pdfVariableDataCsvPath=" << preset.pdfOptions.variableDataCsvPath << '\n';
 
     if (!out.good()) {
         errorMessage = "Failed while writing preset file";
@@ -246,6 +249,11 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     } else {
         preset.buildOptions.sourcePageHeightPoints = 0.0;
     }
+    if (RequireKey(values, "bookletCreepPerSheet", raw)) {
+        if (!ParseDouble(raw, preset.buildOptions.bookletCreepPerSheetPoints)) return fail("bookletCreepPerSheet");
+    } else {
+        preset.buildOptions.bookletCreepPerSheetPoints = 0.0;
+    }
     if (!RequireKey(values, "filter", raw)) return fail("filter");
     preset.buildOptions.filter = StringToFilter(raw);
     if (!RequireKey(values, "reverse", raw) || !ParseBool(raw, preset.buildOptions.reverseOrder)) return fail("reverse");
@@ -281,6 +289,16 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     }
     if (RequireKey(values, "pdfBleedPoints", raw)) {
         if (!ParseDouble(raw, preset.pdfOptions.bleedPoints)) return fail("pdfBleedPoints");
+    }
+    if (RequireKey(values, "pdfOverlayTemplate", preset.pdfOptions.overlayTemplate)) {
+        // Optional key loaded when present.
+    } else {
+        preset.pdfOptions.overlayTemplate.clear();
+    }
+    if (RequireKey(values, "pdfVariableDataCsvPath", preset.pdfOptions.variableDataCsvPath)) {
+        // Optional key loaded when present.
+    } else {
+        preset.pdfOptions.variableDataCsvPath.clear();
     }
 
     return true;

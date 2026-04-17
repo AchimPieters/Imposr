@@ -29,7 +29,12 @@
 - load and save presets
 - presets now store tile overlap + manual/explicit page sequences
 - emit JSON, XML audit, and visual proof PDF output
+- emit placement manifest JSON (`--manifest-out`) with per-slot CTM data for Acrobat composition handoff
+- auto-generate deterministic output bundles via `--output-dir` + `--output-stem` (+ optional UTC timestamp suffix)
 - emit human summary and validation report
+- support validation as a hard quality gate via `--fail-on-validation 1`
+- support booklet creep from CLI/presets (`--creep <pt>`)
+- support slot overlay text templates with optional CSV variable merge (`--pdf-overlay-template`, `--pdf-variable-csv`)
 - inspect source page usage and placement reverse lookup
 - smoke-tested in CI-style local builds
 
@@ -73,18 +78,18 @@
 
 ### M2 — Real composition
 - import source page content into destination sheets
-- map planner placements to Acrobat page transforms
+- planner-to-transform bridge is now available via manifest CTM export; still needs Acrobat SDK execution path
 - generate imposed output PDF from the active Acrobat document
 
 ### M3 — MVP usability
 - expose mode/preset controls in a panel or dialog
 - save presets from the plug-in UI
-- add output naming and destination options
+- output naming and destination options are now available in CLI (`--output-dir`, `--output-stem`, `--stamp-output`) and still need to be surfaced in Acrobat UI
 - add validation feedback to the UI
 
 ### M4 — Prepress extras
 - crop marks / trim marks
 - bleed / overlap
-- creep
+- creep (planner + proof workflow now available; still to validate against Acrobat production composition path)
 - overlays
 - CSV variable text
