@@ -1,5 +1,8 @@
+#include "aimp/ArtifactBundle.h"
 #include "aimp/ImpositionPlan.h"
+#include "aimp/PdfComposer.h"
 
+#include <filesystem>
 #include <string>
 
 // Acrobat SDK headers.
@@ -9,14 +12,22 @@
 namespace {
 
 ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData);
+ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData);
+ACCB1 void ACCB2 ExecuteTwoUpArtifactBundleExport(void* clientData);
 
 AVMenuItem gPluginMenuItem = nullptr;
+AVMenuItem gPluginReportMenuItem = nullptr;
+AVMenuItem gPluginBundleMenuItem = nullptr;
 AVMenu gPluginSubMenu = nullptr;
 ASCallback gMenuExecuteProc = nullptr;
+ASCallback gReportExecuteProc = nullptr;
+ASCallback gBundleExecuteProc = nullptr;
 
 constexpr const char* kExtensionName = "AcrobatImpositionPlugin";
 constexpr const char* kPluginMenuTitle = "Acrobat Imposition Plugin";
 constexpr const char* kMenuItemTitle = "2-Up Demo";
+constexpr const char* kMenuItemReportTitle = "2-Up Report PDF";
+constexpr const char* kMenuItemBundleTitle = "2-Up Artifact Bundle";
 
 void ShowInfoDialog(const std::string& message) {
     AVAlertNote(message.c_str());
@@ -57,6 +68,39 @@ bool RegisterMenus() {
     }
 
     AVMenuAddMenuItem(gPluginSubMenu, gPluginMenuItem, APPEND_MENUITEM);
+
+    gReportExecuteProc = ASCallbackCreateProto(AVExecuteProc, ExecuteTwoUpReportExport);
+    gPluginReportMenuItem = AVMenuItemNew(
+        kMenuItemReportTitle,
+        "AIMP:TwoUpReportPdf",
+        nullptr,
+        true,
+        NO_SHORTCUT,
+        0,
+        gReportExecuteProc,
+        nullptr
+    );
+
+    if (gPluginReportMenuItem == nullptr) {
+        return false;
+    }
+    AVMenuAddMenuItem(gPluginSubMenu, gPluginReportMenuItem, APPEND_MENUITEM);
+
+    gBundleExecuteProc = ASCallbackCreateProto(AVExecuteProc, ExecuteTwoUpArtifactBundleExport);
+    gPluginBundleMenuItem = AVMenuItemNew(
+        kMenuItemBundleTitle,
+        "AIMP:TwoUpArtifactBundle",
+        nullptr,
+        true,
+        NO_SHORTCUT,
+        0,
+        gBundleExecuteProc,
+        nullptr
+    );
+    if (gPluginBundleMenuItem == nullptr) {
+        return false;
+    }
+    AVMenuAddMenuItem(gPluginSubMenu, gPluginBundleMenuItem, APPEND_MENUITEM);
     return true;
 }
 
@@ -90,6 +134,92 @@ ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData) {
     END_HANDLER
 }
 
+ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData) {
+    DURING
+        AVDoc activeDoc = AVAppGetActiveDoc();
+        if (activeDoc == nullptr) {
+            ShowInfoDialog("Open eerst een PDF in Acrobat.");
+            E_RETURN_VOID;
+        }
+
+        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
+        if (pdDoc == nullptr) {
+            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
+            E_RETURN_VOID;
+        }
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        const aimp::SheetSize outputSheet {1190.55, 841.89};
+        const auto plan = aimp::TwoUpPlanner::Build("active-document", static_cast<std::uint32_t>(pageCount), outputSheet);
+
+        std::error_code fsError;
+        const auto tempDir = std::filesystem::temp_directory_path(fsError);
+        if (fsError) {
+            ShowInfoDialog("Kan temp map niet bepalen voor report PDF.");
+            E_RETURN_VOID;
+        }
+        const auto reportPath = (tempDir / "acrobat-imposition-two-up-report.pdf").string();
+        std::string error;
+        if (!aimp::ComposePlanPdf(plan, reportPath, error)) {
+            ShowInfoDialog("Kon geen report PDF maken: " + error);
+            E_RETURN_VOID;
+        }
+
+        ShowInfoDialog("2-Up report PDF opgeslagen:\n" + reportPath);
+    HANDLER
+        ShowInfoDialog("Er trad een fout op tijdens report export.");
+    END_HANDLER
+}
+
+ACCB1 void ACCB2 ExecuteTwoUpArtifactBundleExport(void* clientData) {
+    DURING
+        AVDoc activeDoc = AVAppGetActiveDoc();
+        if (activeDoc == nullptr) {
+            ShowInfoDialog("Open eerst een PDF in Acrobat.");
+            E_RETURN_VOID;
+        }
+
+        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
+        if (pdDoc == nullptr) {
+            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
+            E_RETURN_VOID;
+        }
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        const aimp::SheetSize outputSheet {1190.55, 841.89};
+        const auto plan = aimp::TwoUpPlanner::Build("active-document", static_cast<std::uint32_t>(pageCount), outputSheet);
+
+        std::error_code fsError;
+        const auto tempDir = std::filesystem::temp_directory_path(fsError);
+        if (fsError) {
+            ShowInfoDialog("Kan temp map niet bepalen voor artifact bundle.");
+            E_RETURN_VOID;
+        }
+
+        aimp::ArtifactBundleOptions options {};
+        options.outputDirectory = tempDir.string();
+        options.baseName = "acrobat-imposition-two-up";
+        aimp::ArtifactBundlePaths paths {};
+        std::string error;
+        if (!aimp::WritePlanArtifactBundle(plan, options, paths, error)) {
+            ShowInfoDialog("Kon artifact bundle niet schrijven: " + error);
+            E_RETURN_VOID;
+        }
+
+        std::string message = "2-Up artifact bundle opgeslagen:\n";
+        message += paths.jsonPath;
+        message += "\n";
+        message += paths.auditXmlPath;
+        if (!paths.pdfPath.empty()) {
+            message += "\n";
+            message += paths.pdfPath;
+        }
+        ShowInfoDialog(message);
+    HANDLER
+        ShowInfoDialog("Er trad een fout op tijdens artifact bundle export.");
+    END_HANDLER
+}
+
 } // namespace
 
 extern "C" ACCB1 ASBool ACCB2 PluginExportHFTs(void) {
@@ -105,6 +235,14 @@ extern "C" ACCB1 ASBool ACCB2 PluginInit(void) {
 }
 
 extern "C" ACCB1 ASBool ACCB2 PluginUnload(void) {
+    if (gPluginBundleMenuItem != nullptr) {
+        AVMenuItemRemove(gPluginBundleMenuItem);
+        gPluginBundleMenuItem = nullptr;
+    }
+    if (gPluginReportMenuItem != nullptr) {
+        AVMenuItemRemove(gPluginReportMenuItem);
+        gPluginReportMenuItem = nullptr;
+    }
     if (gPluginMenuItem != nullptr) {
         AVMenuItemRemove(gPluginMenuItem);
         gPluginMenuItem = nullptr;

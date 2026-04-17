@@ -1,0 +1,44 @@
+name: Planner CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  planner-build-test:
+    name: ${{ matrix.os }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_type: Release
+          - os: macos-latest
+            build_type: Release
+          - os: windows-latest
+            build_type: Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Conflict marker guard
+        run: ./scripts/check_conflict_markers.sh
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DAIMP_BUILD_PLUGIN=OFF
+          -DAIMP_BUILD_TESTS=ON
+          -DAIMP_BUILD_CLI=ON
+          -DAIMP_ENABLE_STRICT_WARNINGS=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }}
+
+      - name: Test
+        run: ctest --test-dir build --build-config ${{ matrix.build_type }} --output-on-failure

@@ -17,6 +17,7 @@ Responsibilities:
 - blank-page padding
 - shuffle rules
 - tile planning
+- cross-platform pure-C++ core that can be tested outside Acrobat
 
 ### 3. PDF composition layer
 Responsibilities:
