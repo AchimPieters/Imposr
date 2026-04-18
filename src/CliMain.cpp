@@ -303,8 +303,8 @@ int RunBatchMode(const std::string& cliPath,
             << " --pages " << pages
             << " --sheet-width " << sheetWidth
             << " --sheet-height " << sheetHeight
-            << " --output-dir \"" << outputDir << '"'
-            << " --output-stem \"" << outputStem << '"'
+            << " --output-dir " << outputDir
+            << " --output-stem " << outputStem
             << " --pdfx-profile " << pdfxProfile
             << " --pdf-trim-marks " << trimMarks
             << " --pdf-bleed-box " << bleedBox
