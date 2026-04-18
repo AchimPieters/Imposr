@@ -202,6 +202,16 @@ std::vector<std::string> ParseCsvLine(const std::string& line) {
     return fields;
 }
 
+std::string TrimAscii(std::string value) {
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t' || value.front() == '\r')) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+        value.pop_back();
+    }
+    return value;
+}
+
 std::string BuildBatchReportJson(std::uint32_t totalJobs,
                                  std::uint32_t successJobs,
                                  std::uint32_t failedJobs) {
@@ -245,7 +255,7 @@ int RunBatchMode(const std::string& cliPath,
     const auto headers = ParseCsvLine(headerLine);
     std::map<std::string, std::size_t> columnIndex;
     for (std::size_t i = 0; i < headers.size(); ++i) {
-        columnIndex[headers[i]] = i;
+        columnIndex[TrimAscii(headers[i])] = i;
     }
     if (columnIndex.find("mode") == columnIndex.end() ||
         columnIndex.find("pages") == columnIndex.end() ||
@@ -260,7 +270,7 @@ int RunBatchMode(const std::string& cliPath,
     std::uint32_t failedJobs = 0;
     std::string line;
     while (std::getline(in, line)) {
-        if (line.empty()) {
+        if (TrimAscii(line).empty()) {
             continue;
         }
         const auto fields = ParseCsvLine(line);
@@ -269,7 +279,7 @@ int RunBatchMode(const std::string& cliPath,
             if (it == columnIndex.end() || it->second >= fields.size()) {
                 return fallback;
             }
-            return fields[it->second];
+            return TrimAscii(fields[it->second]);
         };
 
         const std::string mode = get("mode");
@@ -321,6 +331,15 @@ int RunBatchMode(const std::string& cliPath,
     }
 
     if (!batchReportOutPath.empty()) {
+        std::error_code ec;
+        const auto reportParent = std::filesystem::path(batchReportOutPath).parent_path();
+        if (!reportParent.empty()) {
+            std::filesystem::create_directories(reportParent, ec);
+            if (ec) {
+                std::cerr << "Could not create parent directory for --batch-report-out: " << reportParent.string() << '\n';
+                return 1;
+            }
+        }
         std::ofstream out(batchReportOutPath);
         if (!out) {
             std::cerr << "Could not open --batch-report-out: " << batchReportOutPath << '\n';
