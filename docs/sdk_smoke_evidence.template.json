@@ -3,8 +3,10 @@
     {
       "os": "Windows 11 23H2",
       "cpu": "x64",
+      "execution_mode": "host-runtime",
       "acrobat_version": "TBD",
       "sdk_version": "TBD",
+      "run_timestamp_utc": "",
       "plugin_load": "pending",
       "menu_actions": "pending",
       "preset_validate": "pending",
@@ -16,13 +18,18 @@
       "bundle_path": "",
       "proof_pdf_path": "",
       "imposed_output_path": "",
+      "preflight_json_path": "",
+      "sdk_ops_path": "",
+      "control_surface_path": "",
       "notes": ""
     },
     {
       "os": "macOS 14 Sonoma",
       "cpu": "arm64",
+      "execution_mode": "host-runtime",
       "acrobat_version": "TBD",
       "sdk_version": "TBD",
+      "run_timestamp_utc": "",
       "plugin_load": "pending",
       "menu_actions": "pending",
       "preset_validate": "pending",
@@ -34,13 +41,18 @@
       "bundle_path": "",
       "proof_pdf_path": "",
       "imposed_output_path": "",
+      "preflight_json_path": "",
+      "sdk_ops_path": "",
+      "control_surface_path": "",
       "notes": ""
     },
     {
       "os": "macOS 14 Sonoma",
       "cpu": "x64 (Rosetta/Intel)",
+      "execution_mode": "host-runtime",
       "acrobat_version": "TBD",
       "sdk_version": "TBD",
+      "run_timestamp_utc": "",
       "plugin_load": "pending",
       "menu_actions": "pending",
       "preset_validate": "pending",
@@ -52,6 +64,9 @@
       "bundle_path": "",
       "proof_pdf_path": "",
       "imposed_output_path": "",
+      "preflight_json_path": "",
+      "sdk_ops_path": "",
+      "control_surface_path": "",
       "notes": ""
     }
   ]

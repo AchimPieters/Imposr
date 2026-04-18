@@ -1,4 +1,5 @@
 #include "aimp/ImpositionPlan.h"
+#include "aimp/PanelState.h"
 #include "aimp/PdfComposer.h"
 #include "aimp/Preset.h"
 
@@ -172,11 +173,19 @@ std::string BuildPanelStateJson(const std::string& modeLabel,
     out << "  \"preset\": {\n";
     out << "    \"columns\": " << preset.columns << ",\n";
     out << "    \"rows\": " << preset.rows << ",\n";
+    out << "    \"fitToSlot\": " << (preset.buildOptions.scaleToFit ? "true" : "false") << ",\n";
+    out << "    \"autoRotateToFit\": " << (preset.buildOptions.autoRotateToFit ? "true" : "false") << ",\n";
+    out << "    \"reverseOrder\": " << (preset.buildOptions.reverseOrder ? "true" : "false") << ",\n";
+    out << "    \"filter\": \"" << aimp::PanelStateFilterName(preset.buildOptions.filter) << "\",\n";
+    out << "    \"bookletCreepPerSheetPoints\": " << preset.buildOptions.bookletCreepPerSheetPoints << ",\n";
     out << "    \"outputDirectory\": \"" << preset.outputDirectory << "\",\n";
     out << "    \"outputStem\": \"" << preset.outputStem << "\",\n";
     out << "    \"drawTrimMarks\": " << (preset.pdfOptions.drawTrimMarks ? "true" : "false") << ",\n";
+    out << "    \"trimMarkLengthPoints\": " << preset.pdfOptions.trimMarkLengthPoints << ",\n";
+    out << "    \"trimMarkOffsetPoints\": " << preset.pdfOptions.trimMarkOffsetPoints << ",\n";
     out << "    \"drawBleedBox\": " << (preset.pdfOptions.drawBleedBox ? "true" : "false") << ",\n";
     out << "    \"bleedPoints\": " << preset.pdfOptions.bleedPoints << ",\n";
+    out << "    \"pdfxProfile\": \"" << aimp::PdfxProfileName(preset.pdfOptions.targetPdfxProfile) << "\",\n";
     out << "    \"failOnValidationIssues\": " << (preset.pdfOptions.failOnValidationIssues ? "true" : "false") << ",\n";
     out << "    \"failOnPreflightErrors\": " << (preset.pdfOptions.failOnPreflightErrors ? "true" : "false") << "\n";
     out << "  },\n";
@@ -251,6 +260,11 @@ std::string BuildPanelDialogSchemaJson() {
     out << "        {\"id\": \"mode\", \"type\": \"select\", \"options\": [\"two-up\", \"n-up\"]},\n";
     out << "        {\"id\": \"columns\", \"type\": \"number\"},\n";
     out << "        {\"id\": \"rows\", \"type\": \"number\"},\n";
+    out << "        {\"id\": \"fitToSlot\", \"type\": \"boolean\"},\n";
+    out << "        {\"id\": \"autoRotateToFit\", \"type\": \"boolean\"},\n";
+    out << "        {\"id\": \"reverseOrder\", \"type\": \"boolean\"},\n";
+    out << "        {\"id\": \"filter\", \"type\": \"select\", \"options\": [\"all\", \"even\", \"odd\"]},\n";
+    out << "        {\"id\": \"bookletCreepPerSheetPoints\", \"type\": \"number\"},\n";
     out << "        {\"id\": \"sheet.widthPoints\", \"type\": \"number\"},\n";
     out << "        {\"id\": \"sheet.heightPoints\", \"type\": \"number\"}\n";
     out << "      ]\n";
@@ -260,8 +274,11 @@ std::string BuildPanelDialogSchemaJson() {
     out << "      \"label\": \"Prepress\",\n";
     out << "      \"controls\": [\n";
     out << "        {\"id\": \"drawTrimMarks\", \"type\": \"boolean\"},\n";
+    out << "        {\"id\": \"trimMarkLengthPoints\", \"type\": \"number\"},\n";
+    out << "        {\"id\": \"trimMarkOffsetPoints\", \"type\": \"number\"},\n";
     out << "        {\"id\": \"drawBleedBox\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"bleedPoints\", \"type\": \"number\"}\n";
+    out << "        {\"id\": \"bleedPoints\", \"type\": \"number\"},\n";
+    out << "        {\"id\": \"pdfxProfile\", \"type\": \"select\", \"options\": [\"none\", \"pdfx-1a\", \"pdfx-4\"]}\n";
     out << "      ]\n";
     out << "    },\n";
     out << "    {\n";
@@ -281,6 +298,34 @@ std::string BuildPanelDialogSchemaJson() {
     out << "      ]\n";
     out << "    }\n";
     out << "  ]\n";
+    out << "}\n";
+    return out.str();
+}
+
+std::string BuildPanelControlSurfaceJson(const aimp::PlannerPreset& preset) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"kind\": \"acrobat-imposition-control-surface\",\n";
+    out << "  \"version\": 1,\n";
+    out << "  \"defaultState\": {\n";
+    out << "    \"columns\": " << preset.columns << ",\n";
+    out << "    \"rows\": " << preset.rows << ",\n";
+    out << "    \"sheetWidthPoints\": " << preset.sheetSize.widthPoints << ",\n";
+    out << "    \"sheetHeightPoints\": " << preset.sheetSize.heightPoints << ",\n";
+    out << "    \"outputDirectory\": \"" << preset.outputDirectory << "\",\n";
+    out << "    \"outputStem\": \"" << preset.outputStem << "\"\n";
+    out << "  },\n";
+    out << "  \"actions\": [\n";
+    out << "    {\"id\": \"validate\", \"menu\": \"Preset: Validate active job\"},\n";
+    out << "    {\"id\": \"preview\", \"menu\": \"Preset: Preview proof\"},\n";
+    out << "    {\"id\": \"runBundle\", \"menu\": \"Preset: Run bundle\"},\n";
+    out << "    {\"id\": \"applyState\", \"menu\": \"Panel: Apply state\"},\n";
+    out << "    {\"id\": \"openDialog\", \"menu\": \"Panel: Open unified dialog\"}\n";
+    out << "  ],\n";
+    out << "  \"qualityGates\": {\n";
+    out << "    \"failOnValidationIssues\": " << (preset.pdfOptions.failOnValidationIssues ? "true" : "false") << ",\n";
+    out << "    \"failOnPreflightErrors\": " << (preset.pdfOptions.failOnPreflightErrors ? "true" : "false") << "\n";
+    out << "  }\n";
     out << "}\n";
     return out.str();
 }
@@ -323,11 +368,19 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
         << "<label>Mode<select id='mode'><option>two-up</option><option>n-up</option></select></label>"
         << "<label>Columns<input id='columns' type='number' min='1'/></label>"
         << "<label>Rows<input id='rows' type='number' min='1'/></label>"
+        << "<label><input id='fitToSlot' type='checkbox'/> Fit to slot</label>"
+        << "<label><input id='autoRotateToFit' type='checkbox'/> Auto rotate to fit</label>"
+        << "<label><input id='reverseOrder' type='checkbox'/> Reverse order</label>"
+        << "<label>Filter<select id='filter'><option>all</option><option>even</option><option>odd</option></select></label>"
+        << "<label>Booklet creep per sheet (pt)<input id='bookletCreepPerSheetPoints' type='number' step='0.01'/></label>"
         << "<label>Sheet width (pt)<input id='sheetWidth' type='number' step='0.01'/></label>"
         << "<label>Sheet height (pt)<input id='sheetHeight' type='number' step='0.01'/></label>"
         << "<label>Output directory<input id='outputDirectory' type='text'/></label>"
         << "<label>Output stem<input id='outputStem' type='text'/></label>"
+        << "<label>Trim mark length (pt)<input id='trimMarkLengthPoints' type='number' step='0.01'/></label>"
+        << "<label>Trim mark offset (pt)<input id='trimMarkOffsetPoints' type='number' step='0.01'/></label>"
         << "<label>Bleed points<input id='bleedPoints' type='number' step='0.01'/></label>"
+        << "<label>PDF/X profile<select id='pdfxProfile'><option>none</option><option>pdfx-1a</option><option>pdfx-4</option></select></label>"
         << "<label><input id='drawTrimMarks' type='checkbox'/> Draw trim marks</label>"
         << "<label><input id='drawBleedBox' type='checkbox'/> Draw bleed box</label>"
         << "<label><input id='failOnValidationIssues' type='checkbox'/> Fail on validation issues</label>"
@@ -341,11 +394,19 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
     out << "document.getElementById('mode').value = panelState.mode || 'two-up';\n";
     out << "document.getElementById('columns').value = panelState.preset.columns || 2;\n";
     out << "document.getElementById('rows').value = panelState.preset.rows || 1;\n";
+    out << "document.getElementById('fitToSlot').checked = !!panelState.preset.fitToSlot;\n";
+    out << "document.getElementById('autoRotateToFit').checked = !!panelState.preset.autoRotateToFit;\n";
+    out << "document.getElementById('reverseOrder').checked = !!panelState.preset.reverseOrder;\n";
+    out << "document.getElementById('filter').value = panelState.preset.filter || 'all';\n";
+    out << "document.getElementById('bookletCreepPerSheetPoints').value = panelState.preset.bookletCreepPerSheetPoints || 0;\n";
     out << "document.getElementById('sheetWidth').value = panelState.sheet.widthPoints || 0;\n";
     out << "document.getElementById('sheetHeight').value = panelState.sheet.heightPoints || 0;\n";
     out << "document.getElementById('outputDirectory').value = panelState.preset.outputDirectory || '';\n";
     out << "document.getElementById('outputStem').value = panelState.preset.outputStem || '';\n";
+    out << "document.getElementById('trimMarkLengthPoints').value = panelState.preset.trimMarkLengthPoints || 12;\n";
+    out << "document.getElementById('trimMarkOffsetPoints').value = panelState.preset.trimMarkOffsetPoints || 6;\n";
     out << "document.getElementById('bleedPoints').value = panelState.preset.bleedPoints || 0;\n";
+    out << "document.getElementById('pdfxProfile').value = panelState.preset.pdfxProfile || 'none';\n";
     out << "document.getElementById('drawTrimMarks').checked = !!panelState.preset.drawTrimMarks;\n";
     out << "document.getElementById('drawBleedBox').checked = !!panelState.preset.drawBleedBox;\n";
     out << "document.getElementById('failOnValidationIssues').checked = !!panelState.preset.failOnValidationIssues;\n";
@@ -355,11 +416,19 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
     out << "panelState.mode = document.getElementById('mode').value;\n";
     out << "panelState.preset.columns = parseInt(document.getElementById('columns').value || '2', 10);\n";
     out << "panelState.preset.rows = parseInt(document.getElementById('rows').value || '1', 10);\n";
+    out << "panelState.preset.fitToSlot = document.getElementById('fitToSlot').checked;\n";
+    out << "panelState.preset.autoRotateToFit = document.getElementById('autoRotateToFit').checked;\n";
+    out << "panelState.preset.reverseOrder = document.getElementById('reverseOrder').checked;\n";
+    out << "panelState.preset.filter = document.getElementById('filter').value;\n";
+    out << "panelState.preset.bookletCreepPerSheetPoints = parseFloat(document.getElementById('bookletCreepPerSheetPoints').value || '0');\n";
     out << "panelState.sheet.widthPoints = parseFloat(document.getElementById('sheetWidth').value || '0');\n";
     out << "panelState.sheet.heightPoints = parseFloat(document.getElementById('sheetHeight').value || '0');\n";
     out << "panelState.preset.outputDirectory = document.getElementById('outputDirectory').value;\n";
     out << "panelState.preset.outputStem = document.getElementById('outputStem').value;\n";
+    out << "panelState.preset.trimMarkLengthPoints = parseFloat(document.getElementById('trimMarkLengthPoints').value || '12');\n";
+    out << "panelState.preset.trimMarkOffsetPoints = parseFloat(document.getElementById('trimMarkOffsetPoints').value || '6');\n";
     out << "panelState.preset.bleedPoints = parseFloat(document.getElementById('bleedPoints').value || '0');\n";
+    out << "panelState.preset.pdfxProfile = document.getElementById('pdfxProfile').value;\n";
     out << "panelState.preset.drawTrimMarks = document.getElementById('drawTrimMarks').checked;\n";
     out << "panelState.preset.drawBleedBox = document.getElementById('drawBleedBox').checked;\n";
     out << "panelState.preset.failOnValidationIssues = document.getElementById('failOnValidationIssues').checked;\n";
@@ -370,103 +439,6 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
     out << "</script>\n";
     out << "</body></html>";
     return out.str();
-}
-
-bool TryExtractJsonString(const std::string& json,
-                          const std::string& key,
-                          std::string& outValue) {
-    const std::string token = "\"" + key + "\"";
-    const std::size_t keyPos = json.find(token);
-    if (keyPos == std::string::npos) {
-        return false;
-    }
-    const std::size_t colonPos = json.find(':', keyPos + token.size());
-    if (colonPos == std::string::npos) {
-        return false;
-    }
-    const std::size_t firstQuote = json.find('"', colonPos + 1);
-    if (firstQuote == std::string::npos) {
-        return false;
-    }
-    const std::size_t secondQuote = json.find('"', firstQuote + 1);
-    if (secondQuote == std::string::npos) {
-        return false;
-    }
-    outValue = json.substr(firstQuote + 1, secondQuote - firstQuote - 1);
-    return true;
-}
-
-bool TryExtractJsonBool(const std::string& json,
-                        const std::string& key,
-                        bool& outValue) {
-    const std::string token = "\"" + key + "\"";
-    const std::size_t keyPos = json.find(token);
-    if (keyPos == std::string::npos) {
-        return false;
-    }
-    const std::size_t colonPos = json.find(':', keyPos + token.size());
-    if (colonPos == std::string::npos) {
-        return false;
-    }
-    const std::size_t valuePos = json.find_first_not_of(" \t\r\n", colonPos + 1);
-    if (valuePos == std::string::npos) {
-        return false;
-    }
-    if (json.compare(valuePos, 4, "true") == 0) {
-        outValue = true;
-        return true;
-    }
-    if (json.compare(valuePos, 5, "false") == 0) {
-        outValue = false;
-        return true;
-    }
-    return false;
-}
-
-bool TryExtractJsonDouble(const std::string& json,
-                          const std::string& key,
-                          double& outValue) {
-    const std::string token = "\"" + key + "\"";
-    const std::size_t keyPos = json.find(token);
-    if (keyPos == std::string::npos) {
-        return false;
-    }
-    const std::size_t colonPos = json.find(':', keyPos + token.size());
-    if (colonPos == std::string::npos) {
-        return false;
-    }
-    const std::size_t valuePos = json.find_first_not_of(" \t\r\n", colonPos + 1);
-    if (valuePos == std::string::npos) {
-        return false;
-    }
-    std::size_t endPos = valuePos;
-    while (endPos < json.size()) {
-        const char ch = json[endPos];
-        if ((ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == '+') {
-            ++endPos;
-            continue;
-        }
-        break;
-    }
-    if (endPos == valuePos) {
-        return false;
-    }
-    outValue = std::stod(json.substr(valuePos, endPos - valuePos));
-    return true;
-}
-
-bool TryExtractJsonUInt(const std::string& json,
-                        const std::string& key,
-                        std::uint32_t& outValue) {
-    double raw = 0.0;
-    if (!TryExtractJsonDouble(json, key, raw)) {
-        return false;
-    }
-    if (raw < 0.0) {
-        return false;
-    }
-    outValue = static_cast<std::uint32_t>(raw);
-    return true;
 }
 
 ASInt32 NormalizeRotationDegrees(double rotationDegrees) {
@@ -1053,6 +1025,7 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         const auto sdkOpsPath = (base / "sdk-ops.json").string();
         const auto xobjectComposePath = (base / "xobject-compose.json").string();
         const auto compositionPath = (base / "production-composition.json").string();
+        const auto panelControlPath = (base / "control-surface.json").string();
         const auto proofPath = (base / "proof.pdf").string();
         const auto imposedOutputPath = (base / "imposed-output.pdf").string();
         const auto preflightPath = (base / "preflight.json").string();
@@ -1097,6 +1070,10 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         {
             std::ofstream out(compositionPath);
             out << aimp::ToProductionCompositionJson(plan, preset.buildOptions, preset.pdfOptions);
+        }
+        {
+            std::ofstream out(panelControlPath);
+            out << BuildPanelControlSurfaceJson(preset);
         }
         if (!aimp::ComposePlanPdf(plan, proofPath, preset.pdfOptions, error)) {
             ShowInfoDialog("Kon proof PDF niet maken: " + error);
@@ -1327,37 +1304,25 @@ ACCB1 void ACCB2 ExecutePanelApplyState(void* clientData) {
             BuildDefaultPreset(preset);
         }
 
-        std::string mode;
-        if (TryExtractJsonString(json, "mode", mode)) {
-            if (mode == "n-up") {
-                if (preset.columns == 0) {
-                    preset.columns = 2;
-                }
-                if (preset.rows == 0) {
-                    preset.rows = 2;
-                }
-            } else if (mode == "two-up") {
-                preset.columns = 2;
-                preset.rows = 1;
-            }
+        aimp::PanelStateApplyResult applyResult {};
+        if (!aimp::ApplyPanelStateJsonToPreset(json, preset, applyResult)) {
+            ShowInfoDialog("Panel-state kon niet worden toegepast: JSON mist verplichte sheet/preset secties.");
+            E_RETURN_VOID;
         }
-        TryExtractJsonDouble(json, "widthPoints", preset.sheetSize.widthPoints);
-        TryExtractJsonDouble(json, "heightPoints", preset.sheetSize.heightPoints);
-        TryExtractJsonUInt(json, "columns", preset.columns);
-        TryExtractJsonUInt(json, "rows", preset.rows);
-        TryExtractJsonString(json, "outputDirectory", preset.outputDirectory);
-        TryExtractJsonString(json, "outputStem", preset.outputStem);
-        TryExtractJsonBool(json, "drawTrimMarks", preset.pdfOptions.drawTrimMarks);
-        TryExtractJsonBool(json, "drawBleedBox", preset.pdfOptions.drawBleedBox);
-        TryExtractJsonDouble(json, "bleedPoints", preset.pdfOptions.bleedPoints);
-        TryExtractJsonBool(json, "failOnValidationIssues", preset.pdfOptions.failOnValidationIssues);
-        TryExtractJsonBool(json, "failOnPreflightErrors", preset.pdfOptions.failOnPreflightErrors);
 
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon panel-state niet toepassen op preset: " + error);
             E_RETURN_VOID;
         }
-        ShowInfoDialog("Panel-state toegepast op preset:\n" + presetPath);
+        std::ostringstream msg;
+        msg << "Panel-state toegepast op preset:\n" << presetPath;
+        if (!applyResult.warnings.empty()) {
+            msg << "\n\nNormalisaties:";
+            for (const auto& warning : applyResult.warnings) {
+                msg << "\n- " << warning;
+            }
+        }
+        ShowInfoDialog(msg.str());
     HANDLER
         ShowInfoDialog("Er trad een fout op bij panel-state apply.");
     END_HANDLER

@@ -31,6 +31,13 @@ REQUIRED_CHECKS = (
     "panel_quick_actions",
 )
 
+REQUIRED_METADATA = (
+    "execution_mode",
+    "acrobat_version",
+    "sdk_version",
+    "run_timestamp_utc",
+)
+
 
 def _normalize(value: str) -> str:
     return value.strip().lower()
@@ -38,6 +45,11 @@ def _normalize(value: str) -> str:
 
 def _is_pass(value: str) -> bool:
     return _normalize(value) in {"pass", "ok", "true", "1"}
+
+
+def _is_valid_execution_mode(value: str) -> bool:
+    normalized = _normalize(value)
+    return normalized in {"host-runtime", "simulated-runtime"}
 
 
 def main() -> int:
@@ -75,7 +87,25 @@ def main() -> int:
             if not _is_pass(value):
                 failed.append(f"{os_name} / {cpu}: {check}={value!r} (expected pass)")
 
-        for artifact_key in ("bundle_path", "proof_pdf_path", "imposed_output_path"):
+        for metadata_key in REQUIRED_METADATA:
+            metadata_value = str(row.get(metadata_key, "")).strip()
+            if metadata_value == "" or metadata_value.lower() == "tbd":
+                failed.append(f"{os_name} / {cpu}: missing metadata field {metadata_key}")
+        execution_mode = str(row.get("execution_mode", ""))
+        if not _is_valid_execution_mode(execution_mode):
+            failed.append(
+                f"{os_name} / {cpu}: execution_mode={execution_mode!r} "
+                "(expected host-runtime or simulated-runtime)"
+            )
+
+        for artifact_key in (
+            "bundle_path",
+            "proof_pdf_path",
+            "imposed_output_path",
+            "preflight_json_path",
+            "sdk_ops_path",
+            "control_surface_path",
+        ):
             artifact_value = str(row.get(artifact_key, "")).strip()
             if artifact_value == "":
                 failed.append(f"{os_name} / {cpu}: missing evidence field {artifact_key}")

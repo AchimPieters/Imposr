@@ -1,4 +1,5 @@
 #include "aimp/ImpositionPlan.h"
+#include "aimp/PanelState.h"
 #include "aimp/PdfComposer.h"
 #include "aimp/Preset.h"
 
@@ -242,6 +243,9 @@ int main() {
         if (productionJson.find("\"kind\": \"acrobat-production-composition\"") == std::string::npos ||
             productionJson.find("\"pdfxProfile\": \"pdfx-4\"") == std::string::npos ||
             productionJson.find("\"trimMarks\": true") == std::string::npos ||
+            productionJson.find("\"executionPlan\"") == std::string::npos ||
+            productionJson.find("\"engine\": \"acrobat-sdk-native\"") == std::string::npos ||
+            productionJson.find("\"prepressOps\"") == std::string::npos ||
             productionJson.find("\"runtimeQualityGate\"") == std::string::npos ||
             productionJson.find("\"resolvedOverlay\": \"sheet=1 slot=1 page=1 code=ALPHA\"") == std::string::npos) {
             return Fail("Production composition JSON should include prepress and profile settings.");
@@ -253,6 +257,138 @@ int main() {
         if (preflightJson.find("\"status\": \"ok\"") == std::string::npos ||
             preflightJson.find("\"errorCount\": 0") == std::string::npos) {
             return Fail("Preflight JSON export should report status and errorCount.");
+        }
+    }
+
+    {
+        aimp::PlannerPreset preset {};
+        preset.sheetSize = {1000.0, 700.0};
+        preset.columns = 2;
+        preset.rows = 1;
+        preset.outputStem = "seed";
+        preset.pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx1a2001;
+
+        const std::string panelState = R"JSON(
+{
+  "mode": "n-up",
+  "sheet": {"widthPoints": -5, "heightPoints": 0},
+  "preset": {
+    "columns": 0,
+    "rows": 0,
+    "fitToSlot": true,
+    "autoRotateToFit": true,
+    "reverseOrder": true,
+    "filter": "odd",
+    "bookletCreepPerSheetPoints": 3.5,
+    "outputDirectory": "/tmp/imposr",
+    "outputStem": "",
+    "drawTrimMarks": true,
+    "trimMarkLengthPoints": -1,
+    "trimMarkOffsetPoints": -2,
+    "drawBleedBox": true,
+    "bleedPoints": -4,
+    "pdfxProfile": "pdfx-4",
+    "failOnValidationIssues": false,
+    "failOnPreflightErrors": false
+  }
+}
+)JSON";
+        aimp::PanelStateApplyResult result {};
+        if (!aimp::ApplyPanelStateJsonToPreset(panelState, preset, result) || !result.applied) {
+            return Fail("Panel-state parser should accept valid sheet/preset payloads.");
+        }
+        if (preset.columns != 1 || preset.rows != 1) {
+            return Fail("Panel-state parser should normalize zero columns/rows to 1.");
+        }
+        if (preset.sheetSize.widthPoints <= 0.0 || preset.sheetSize.heightPoints <= 0.0) {
+            return Fail("Panel-state parser should normalize invalid sheet dimensions.");
+        }
+        if (!preset.buildOptions.scaleToFit || !preset.buildOptions.autoRotateToFit || !preset.buildOptions.reverseOrder) {
+            return Fail("Panel-state parser should map fit/rotate/reverse booleans.");
+        }
+        if (preset.buildOptions.filter != aimp::PageFilter::OddOnly) {
+            return Fail("Panel-state parser should map filter enum values.");
+        }
+        if (preset.buildOptions.bookletCreepPerSheetPoints != 3.5) {
+            return Fail("Panel-state parser should map creep value.");
+        }
+        if (preset.outputDirectory != "/tmp/imposr" || preset.outputStem.empty()) {
+            return Fail("Panel-state parser should map output path and normalize empty stem.");
+        }
+        if (!preset.pdfOptions.drawTrimMarks || !preset.pdfOptions.drawBleedBox) {
+            return Fail("Panel-state parser should map trim/bleed booleans.");
+        }
+        if (preset.pdfOptions.trimMarkLengthPoints != 0.0 ||
+            preset.pdfOptions.trimMarkOffsetPoints != 0.0 ||
+            preset.pdfOptions.bleedPoints != 0.0) {
+            return Fail("Panel-state parser should normalize negative trim/bleed geometry.");
+        }
+        if (preset.pdfOptions.targetPdfxProfile != aimp::PdfxProfile::Pdfx4) {
+            return Fail("Panel-state parser should parse pdfxProfile values.");
+        }
+        if (preset.pdfOptions.failOnValidationIssues || preset.pdfOptions.failOnPreflightErrors) {
+            return Fail("Panel-state parser should map quality gate booleans.");
+        }
+        if (result.warnings.empty()) {
+            return Fail("Panel-state parser should emit normalization warnings when clamping values.");
+        }
+    }
+
+    {
+        aimp::PlannerPreset preset {};
+        aimp::PanelStateApplyResult result {};
+        if (aimp::ApplyPanelStateJsonToPreset(R"({\"mode\":\"n-up\"})", preset, result)) {
+            return Fail("Panel-state parser should reject payloads without sheet/preset sections.");
+        }
+    }
+
+    {
+        aimp::PlannerPreset preset {};
+        preset.pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx1a2001;
+        aimp::PanelStateApplyResult result {};
+        if (!aimp::ApplyPanelStateJsonToPreset(
+                R"({"sheet":{"widthPoints":1000,"heightPoints":700},"preset":{"pdfxProfile":"not-real"}})",
+                preset,
+                result)) {
+            return Fail("Panel-state parser should still apply payloads with unknown pdfxProfile values.");
+        }
+        if (preset.pdfOptions.targetPdfxProfile != aimp::PdfxProfile::Pdfx1a2001) {
+            return Fail("Panel-state parser should keep existing profile on invalid pdfxProfile value.");
+        }
+        if (result.warnings.empty()) {
+            return Fail("Invalid pdfxProfile should produce a warning.");
+        }
+    }
+
+    {
+        aimp::PlannerPreset preset {};
+        preset.columns = 2;
+        preset.rows = 1;
+        preset.outputDirectory = "seed";
+        aimp::PanelStateApplyResult result {};
+        if (!aimp::ApplyPanelStateJsonToPreset(
+                R"({
+                  "mode":"n-up",
+                  "sheet":{"widthPoints":1000,"heightPoints":700},
+                  "preset":{
+                    "columns": 1.5,
+                    "rows": 2,
+                    "outputDirectory":"C:\\tmp\\brace-}value",
+                    "outputStem":"ok-stem"
+                  }
+                })",
+                preset,
+                result)) {
+            return Fail("Panel-state parser should parse escaped strings and nested braces in string values.");
+        }
+        if (preset.columns != 2) {
+            return Fail("Panel-state parser should ignore non-integer columns values.");
+        }
+        if (preset.rows != 2) {
+            return Fail("Panel-state parser should still apply valid integer rows values.");
+        }
+        if (preset.outputDirectory != "C:\\tmp\\brace-}value") {
+            return Fail("Panel-state parser should preserve escaped path strings with brace characters.");
         }
     }
 
