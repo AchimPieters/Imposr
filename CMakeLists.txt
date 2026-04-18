@@ -86,5 +86,13 @@ if(AIMP_BUILD_TESTS)
       NAME imposr_cli_smoke
       COMMAND imposr_cli two-up --pages 4 --sheet-width 1000 --sheet-height 700
     )
+    add_test(
+      NAME imposr_cli_quality_gate_smoke
+      COMMAND imposr_cli two-up --pages 4 --sheet-width 1000 --sheet-height 700 --pdfx-profile pdfx-4 --pdf-trim-marks 1 --pdf-bleed-box 1 --pdf-bleed 6 --fail-on-quality-gate 1 --output-dir ${CMAKE_BINARY_DIR}/qa-smoke --output-stem gate-smoke
+    )
+    add_test(
+      NAME imposr_cli_batch_smoke
+      COMMAND imposr_cli batch --batch-csv ${CMAKE_SOURCE_DIR}/tests/data/batch_smoke.csv --output-dir ${CMAKE_BINARY_DIR}/batch-smoke --batch-report-out ${CMAKE_BINARY_DIR}/batch-smoke/report.json --fail-on-quality-gate 1
+    )
   endif()
 endif()

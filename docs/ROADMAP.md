@@ -35,6 +35,11 @@
 - support validation as a hard quality gate via `--fail-on-validation 1`
 - support booklet creep from CLI/presets (`--creep <pt>`)
 - support slot overlay text templates with optional CSV variable merge (`--pdf-overlay-template`, `--pdf-variable-csv`)
+- support PDF/X-oriented preflight checks with severity reporting and quality gate (`--pdfx-profile`, `--preflight`, `--fail-on-preflight`, `--preflight-out`)
+- emit deterministic job reports (`--job-out`) with consolidated quality-gate status for CI/hot-folder orchestration
+- emit Acrobat placement handoff JavaScript (`--acrobat-js-out`) derived from planner CTM data for faster SDK integration
+- emit production composition manifest (`--composition-out`) including prepress intent (trim/bleed/creep/overlay/CSV/PDF-X) for Acrobat SDK execution
+- run multi-job batch orchestration from CSV (`batch` mode + `--batch-csv`) with batch report output for hot-folder style processing
 - inspect source page usage and placement reverse lookup
 - smoke-tested in CI-style local builds
 
@@ -52,14 +57,14 @@
 ### Acrobat plug-in integration
 - requires the real Adobe Acrobat SDK on the build machine
 - requires platform-specific include/link settings for Windows 11 and macOS
-- current repo contains a plug-in skeleton and menu registration code, but not a validated production build in this environment
+- current repo contains a plug-in skeleton plus preset save/preview/run-bundle menu workflows, but not a validated production build in this environment
 - current proof PDF generation is SDK-independent and does not yet place real source PDF page content onto destination sheets inside Acrobat
 
 ### Product MVP gaps
 - no production control panel yet
 - no real Acrobat preview workflow yet
 - no actual page-content composition from source PDFs yet
-- no crop/trim marks, bleed, creep, overlays, CSV merge, or PDF/X workflow yet
+- no production Acrobat page-composition path for crop/trim marks, bleed, creep, overlays, CSV merge, or PDF/X workflow yet
 
 ## Recommended next milestones
 
@@ -79,13 +84,15 @@
 ### M2 — Real composition
 - import source page content into destination sheets
 - planner-to-transform bridge is now available via manifest CTM export; still needs Acrobat SDK execution path
+- planner-to-transform bridge now also emits Acrobat placement JS skeleton; still needs real SDK execution path
 - generate imposed output PDF from the active Acrobat document
 
 ### M3 — MVP usability
 - expose mode/preset controls in a panel or dialog
-- save presets from the plug-in UI
+- save/load/preview/run flows from plug-in menu are now available; full panel UX still pending
 - output naming and destination options are now available in CLI (`--output-dir`, `--output-stem`, `--stamp-output`) and still need to be surfaced in Acrobat UI
 - add validation feedback to the UI
+- CLI now supports a combined quality gate (`--fail-on-quality-gate`) and consolidated job report artifacts that should be surfaced in Acrobat UI
 
 ### M4 — Prepress extras
 - crop marks / trim marks
@@ -93,3 +100,4 @@
 - creep (planner + proof workflow now available; still to validate against Acrobat production composition path)
 - overlays
 - CSV variable text
+- PDF/X preflight policy is now available in CLI/proof workflow and still needs Acrobat production wiring + real profile validation

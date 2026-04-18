@@ -167,6 +167,7 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "pdfBleedPoints=" << preset.pdfOptions.bleedPoints << '\n';
     out << "pdfOverlayTemplate=" << preset.pdfOptions.overlayTemplate << '\n';
     out << "pdfVariableDataCsvPath=" << preset.pdfOptions.variableDataCsvPath << '\n';
+    out << "pdfxProfile=" << PdfxProfileName(preset.pdfOptions.targetPdfxProfile) << '\n';
 
     if (!out.good()) {
         errorMessage = "Failed while writing preset file";
@@ -299,6 +300,11 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         // Optional key loaded when present.
     } else {
         preset.pdfOptions.variableDataCsvPath.clear();
+    }
+    if (RequireKey(values, "pdfxProfile", raw)) {
+        if (!TryParsePdfxProfile(raw, preset.pdfOptions.targetPdfxProfile)) return fail("pdfxProfile");
+    } else {
+        preset.pdfOptions.targetPdfxProfile = PdfxProfile::None;
     }
 
     return true;

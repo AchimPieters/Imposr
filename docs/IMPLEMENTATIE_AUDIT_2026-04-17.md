@@ -25,6 +25,7 @@ Geïmplementeerd zonder Acrobat SDK-afhankelijkheid:
 - Genereren van geldige output-PDF met sheet/slot-visualisatie.
 - Header/footer labels, sheetnummering, Bates-prefix/startwaarde.
 - Trim-marks en bleed-box visualisatie voor prepress-proofing.
+- PDF/X-georiënteerde preflight checks met fouten/warnings en CLI quality gate.
 
 Belangrijk: dit is nu nog een **proof composer** en plaatst geen echte bronpagina-content in output vellen.
 
@@ -33,14 +34,18 @@ Geïmplementeerd:
 - CLI om plannen te bouwen voor 2-up, N-up, booklet en step-repeat.
 - Presets laden/opslaan.
 - JSON / XML audit / PDF proof output.
+- Deterministische job-report output (`--job-out`) met geconsolideerde quality-gate status.
+- Acrobat placement handoff JavaScript (`--acrobat-js-out`) op basis van planner-CTM.
+- Productie-compositie manifest (`--composition-out`) met prepress-intent voor SDK-uitvoering.
+- Batch-orchestratie via CSV (`batch` + `--batch-csv`) met samenvattend batch-report.
 - Validatie-output, inspectie-opties en smoke testpad.
 
 ### 1.4 Acrobat plug-in skeleton
 Geïmplementeerd als host-integratie basis:
 - Plug-in target in CMake (conditioneel op `ACROBAT_SDK_DIR`).
-- Menu-registratie met demo-actie en report-actie.
+- Menu-registratie met demo-actie, report-actie, preset-save, preset-preview en preset-run-bundle.
 - Actieve documenttoegang (`AVAppGetActiveDoc`, `AVDocGetPDDoc`) en page-count uitlezen.
-- Export van proof-PDF naar temp map vanuit plug-in menuactie.
+- Export van proof-PDF en volledige run-bundle (plan/manifest/audit/placement JS/production composition/preflight/proof) naar temp map vanuit plug-in menuacties.
 
 Belangrijk: dit is nog **geen productieklare content-imposition in Acrobat**.
 

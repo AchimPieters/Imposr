@@ -2,7 +2,7 @@
 
 ## Current score
 
-**67 / 100**
+**71 / 100**
 
 This score reflects what is already production-like in planner/workflow logic versus what is still missing for a true Acrobat Pro MVP.
 
@@ -20,33 +20,33 @@ Subtotal: **25 / 25**
 ### 2) Deterministic workflow and outputs — 20 pts
 - ✅ Preset load/save with build + PDF options: **8 / 8**
 - ✅ JSON + XML audit + proof PDF export: **6 / 6**
-- ✅ Output bundle automation (`--output-dir`, `--output-stem`, `--stamp-output`): **4 / 4**
+- ✅ Output/batch automation (`--output-dir`, `--output-stem`, `--stamp-output`, `batch`, `--job-out`, `--composition-out`): **4 / 4**
 - ✅ Validation quality gate (`--fail-on-validation`): **2 / 2**
 
 Subtotal: **20 / 20**
 
 ### 3) Acrobat host integration — 25 pts
 - ✅ Plug-in skeleton, menu wiring, active doc access: **8 / 10**
-- ✅ Placement manifest CTM bridge for composition handoff: **3 / 3**
+- ✅ Placement manifest CTM bridge + Acrobat JS handoff skeleton for composition integration: **4 / 4**
 - ⚠️ Real SDK build and smoke validation on Windows 11 + macOS: **2 / 8**
 - ❌ Real page-content placement pipeline into imposed output PDF: **0 / 7**
 
-Subtotal: **13 / 25**
+Subtotal: **14 / 25**
 
 ### 4) Product UX in Acrobat — 15 pts
-- ❌ Control panel/dialog for mode + presets + run: **0 / 6**
+- ⚠️ Menu-based preset save/preview/run flow exists; full panel/dialog still missing: **1 / 6**
 - ❌ Output naming/destination controls in UI: **0 / 4**
 - ⚠️ Validation feedback in UI: **1 / 3**
-- ⚠️ Preset lifecycle (save/update/delete) in UI: **1 / 2**
+- ⚠️ Preset lifecycle (save/load) via menu flow: **2 / 2**
 
-Subtotal: **2 / 15**
+Subtotal: **4 / 15**
 
 ### 5) Prepress production features — 15 pts
 - ⚠️ Trim marks + bleed currently as proof visualization: **4 / 6**
 - ⚠️ Creep + overlays + CSV variable data now in planner/proof flow (Acrobat production path still open): **3 / 6**
-- ❌ PDF/X validation and profile-based output checks: **0 / 3**
+- ⚠️ PDF/X-oriented preflight checks and combined quality gates (`--pdfx-profile`, `--preflight`, `--fail-on-preflight`, `--fail-on-quality-gate`): **2 / 3**
 
-Subtotal: **7 / 15**
+Subtotal: **8 / 15**
 
 ---
 

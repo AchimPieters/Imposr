@@ -230,6 +230,143 @@ std::string ExpandOverlayTemplate(const std::string& templ, const VariableMap& v
 
 } // namespace
 
+const char* PdfxProfileName(PdfxProfile profile) {
+    switch (profile) {
+        case PdfxProfile::None: return "none";
+        case PdfxProfile::Pdfx1a2001: return "pdfx-1a";
+        case PdfxProfile::Pdfx4: return "pdfx-4";
+        default: return "none";
+    }
+}
+
+bool TryParsePdfxProfile(const std::string& value, PdfxProfile& outProfile) {
+    if (value == "none") {
+        outProfile = PdfxProfile::None;
+        return true;
+    }
+    if (value == "pdfx-1a" || value == "pdfx-1a:2001") {
+        outProfile = PdfxProfile::Pdfx1a2001;
+        return true;
+    }
+    if (value == "pdfx-4" || value == "pdfx-4:2010") {
+        outProfile = PdfxProfile::Pdfx4;
+        return true;
+    }
+    return false;
+}
+
+std::vector<PreflightIssue> ValidatePrepressReadiness(const ImpositionPlan& plan,
+                                                      const PdfComposeOptions& options) {
+    std::vector<PreflightIssue> issues;
+
+    if (plan.outputSheet.widthPoints <= 0.0 || plan.outputSheet.heightPoints <= 0.0) {
+        issues.push_back({"sheet.invalid-size", "Output sheet size must be greater than zero.", true});
+    }
+
+    if (options.drawTrimMarks && options.trimMarkLengthPoints <= 0.0) {
+        issues.push_back({"trim.invalid-length", "Trim mark length must be > 0 when trim marks are enabled.", true});
+    }
+    if (options.trimMarkOffsetPoints < 0.0) {
+        issues.push_back({"trim.invalid-offset", "Trim mark offset must be >= 0.", true});
+    }
+    if (options.drawBleedBox && options.bleedPoints <= 0.0) {
+        issues.push_back({"bleed.invalid-size", "Bleed points must be > 0 when bleed box drawing is enabled.", true});
+    }
+    if (!options.overlayTemplate.empty() && options.variableDataCsvPath.empty()) {
+        issues.push_back({"overlay.csv-missing", "Overlay template is set without variable CSV; only built-in variables will be available.", false});
+    }
+    if (options.overlayTemplate.empty() && !options.variableDataCsvPath.empty()) {
+        issues.push_back({"overlay.template-missing", "Variable CSV is set without an overlay template.", false});
+    }
+
+    if (options.targetPdfxProfile != PdfxProfile::None) {
+        if (!options.drawTrimMarks) {
+            issues.push_back({"pdfx.trim-required", "Selected PDF/X profile requires trim marks to be enabled for proof parity.", true});
+        }
+        if (!options.drawBleedBox || options.bleedPoints <= 0.0) {
+            issues.push_back({"pdfx.bleed-required", "Selected PDF/X profile requires bleed box visualization with bleed > 0.", true});
+        }
+        for (const auto& placement : plan.placements) {
+            if (placement.sourcePage.pageIndex == kBlankPageIndex) {
+                issues.push_back({"pdfx.blank-placement", "Plan contains blank placements; verify this is allowed for final PDF/X delivery.", false});
+                break;
+            }
+        }
+    }
+
+    return issues;
+}
+
+std::string ToProductionCompositionJson(const ImpositionPlan& plan,
+                                        const BuildOptions& buildOptions,
+                                        const PdfComposeOptions& options) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"kind\": \"acrobat-production-composition\",\n";
+    out << "  \"mode\": \"" << LayoutModeName(plan.mode) << "\",\n";
+    out << "  \"sheet\": {\"widthPoints\": " << plan.outputSheet.widthPoints
+        << ", \"heightPoints\": " << plan.outputSheet.heightPoints << "},\n";
+    out << "  \"prepress\": {\n";
+    out << "    \"pdfxProfile\": \"" << PdfxProfileName(options.targetPdfxProfile) << "\",\n";
+    out << "    \"trimMarks\": " << (options.drawTrimMarks ? "true" : "false") << ",\n";
+    out << "    \"trimMarkLengthPoints\": " << options.trimMarkLengthPoints << ",\n";
+    out << "    \"trimMarkOffsetPoints\": " << options.trimMarkOffsetPoints << ",\n";
+    out << "    \"bleedBox\": " << (options.drawBleedBox ? "true" : "false") << ",\n";
+    out << "    \"bleedPoints\": " << options.bleedPoints << ",\n";
+    out << "    \"bookletCreepPerSheetPoints\": " << buildOptions.bookletCreepPerSheetPoints << ",\n";
+    out << "    \"overlayTemplate\": \"" << EscapePdfText(options.overlayTemplate) << "\",\n";
+    out << "    \"variableDataCsvPath\": \"" << EscapePdfText(options.variableDataCsvPath) << "\"\n";
+    out << "  },\n";
+    out << "  \"placements\": [\n";
+    for (std::size_t i = 0; i < plan.placements.size(); ++i) {
+        const auto& p = plan.placements[i];
+        double a = p.targetRect.width;
+        double b = 0.0;
+        double c = 0.0;
+        double d = p.targetRect.height;
+        double e = p.targetRect.x;
+        double f = p.targetRect.y;
+        if (p.rotationDegrees == 90.0) {
+            a = 0.0;
+            b = p.targetRect.height;
+            c = -p.targetRect.width;
+            d = 0.0;
+            e = p.targetRect.x + p.targetRect.width;
+            f = p.targetRect.y;
+        } else if (p.rotationDegrees == 180.0) {
+            a = -p.targetRect.width;
+            d = -p.targetRect.height;
+            e = p.targetRect.x + p.targetRect.width;
+            f = p.targetRect.y + p.targetRect.height;
+        } else if (p.rotationDegrees == 270.0) {
+            a = 0.0;
+            b = -p.targetRect.height;
+            c = p.targetRect.width;
+            d = 0.0;
+            e = p.targetRect.x;
+            f = p.targetRect.y + p.targetRect.height;
+        }
+
+        out << "    {\"sheetIndex\": " << p.sheetIndex
+            << ", \"slotIndex\": " << p.slotIndex
+            << ", \"sourcePageIndex\": " << p.sourcePage.pageIndex
+            << ", \"rotationDegrees\": " << p.rotationDegrees
+            << ", \"ctm\": {\"a\": " << a
+            << ", \"b\": " << b
+            << ", \"c\": " << c
+            << ", \"d\": " << d
+            << ", \"e\": " << e
+            << ", \"f\": " << f << "}}";
+        if (i + 1 < plan.placements.size()) {
+            out << ',';
+        }
+        out << '\n';
+    }
+    out << "  ]\n";
+    out << "}\n";
+    return out.str();
+}
+
 bool ComposePlanPdf(const ImpositionPlan& plan,
                     const std::string& outputPath,
                     const PdfComposeOptions& options,
