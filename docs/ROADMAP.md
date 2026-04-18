@@ -30,6 +30,7 @@
 - presets now store tile overlap + manual/explicit page sequences
 - emit JSON, XML audit, and visual proof PDF output
 - emit placement manifest JSON (`--manifest-out`) with per-slot CTM data for Acrobat composition handoff
+- emit SDK placement operation manifest (`--sdk-ops-out`) with explicit `place-page` ops + CTM/rotation/scale payload for native SDK wiring
 - auto-generate deterministic output bundles via `--output-dir` + `--output-stem` (+ optional UTC timestamp suffix)
 - emit human summary and validation report
 - support validation as a hard quality gate via `--fail-on-validation 1`
@@ -59,6 +60,8 @@
 - requires platform-specific include/link settings for Windows 11 and macOS
 - current repo contains a plug-in skeleton plus preset save/preview/run-bundle menu workflows, but not a validated production build in this environment
 - current proof PDF generation is SDK-independent and does not yet place real source PDF page content onto destination sheets inside Acrobat
+- run-bundle now includes `sdk-ops.json` so native SDK transform placement can bind directly to deterministic operation records
+- cross-platform evidence tooling now includes validator + markdown checklist generator from smoke evidence JSON
 
 ### Product MVP gaps
 - no production control panel yet
@@ -84,14 +87,17 @@
 ### M2 — Real composition
 - import source page content into destination sheets
 - planner-to-transform bridge is now available via manifest CTM export; still needs Acrobat SDK execution path
-- planner-to-transform bridge now also emits Acrobat placement JS skeleton; still needs real SDK execution path
+- planner-to-transform bridge now emits adapter-based Acrobat placement scaffold plus an Acrobat-JS executable fallback (`runAimpPlacementWithAcrobatJs`) for host-side proof composition
+- plug-in now includes an experimental native SDK composer adapter (compile flag: `AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER`) that consumes `sdk-ops.json`, applies placement order + rotation (snapped to quarter-turns), and prefers planner-authored `targetRect` geometry for destination crop/media boxes with CTM fallback for first-pass transform parity
 - generate imposed output PDF from the active Acrobat document
 
 ### M3 — MVP usability
 - expose mode/preset controls in a panel or dialog
-- save/load/preview/run flows from plug-in menu are now available; full panel UX still pending
-- output naming and destination options are now available in CLI (`--output-dir`, `--output-stem`, `--stamp-output`) and still need to be surfaced in Acrobat UI
-- add validation feedback to the UI
+- save/load/preview/run/validate/quick-config flows from plug-in menu are now available; full panel UX still pending
+- output naming and destination options are now available in CLI and via preset (`outputDirectory`, `outputStem`) for Acrobat runs; interactive UI controls still pending
+- validation + preflight blocking feedback is now available in Acrobat run/validate menu flows
+- successful run-bundle flow now attempts to open generated proof PDF automatically in Acrobat
+- run/validate flows now emit `panel-state.json` snapshot to accelerate implementation of a full persistent panel/dialog UI
 - CLI now supports a combined quality gate (`--fail-on-quality-gate`) and consolidated job report artifacts that should be surfaced in Acrobat UI
 
 ### M4 — Prepress extras
@@ -100,4 +106,4 @@
 - creep (planner + proof workflow now available; still to validate against Acrobat production composition path)
 - overlays
 - CSV variable text
-- PDF/X preflight policy is now available in CLI/proof workflow and still needs Acrobat production wiring + real profile validation
+- PDF/X preflight policy is now available in CLI/proof workflow and Acrobat run-bundle preflight JSON export; production composition JSON now carries runtime gate snapshot + resolved overlay payloads, but still needs real Acrobat SDK placement + profile validation

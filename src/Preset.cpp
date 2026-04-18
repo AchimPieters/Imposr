@@ -168,6 +168,10 @@ bool SavePreset(const PlannerPreset& preset, const std::string& path, std::strin
     out << "pdfOverlayTemplate=" << preset.pdfOptions.overlayTemplate << '\n';
     out << "pdfVariableDataCsvPath=" << preset.pdfOptions.variableDataCsvPath << '\n';
     out << "pdfxProfile=" << PdfxProfileName(preset.pdfOptions.targetPdfxProfile) << '\n';
+    out << "failOnValidationIssues=" << (preset.pdfOptions.failOnValidationIssues ? 1 : 0) << '\n';
+    out << "failOnPreflightErrors=" << (preset.pdfOptions.failOnPreflightErrors ? 1 : 0) << '\n';
+    out << "outputDirectory=" << preset.outputDirectory << '\n';
+    out << "outputStem=" << preset.outputStem << '\n';
 
     if (!out.good()) {
         errorMessage = "Failed while writing preset file";
@@ -305,6 +309,26 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         if (!TryParsePdfxProfile(raw, preset.pdfOptions.targetPdfxProfile)) return fail("pdfxProfile");
     } else {
         preset.pdfOptions.targetPdfxProfile = PdfxProfile::None;
+    }
+    if (RequireKey(values, "failOnValidationIssues", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.failOnValidationIssues)) return fail("failOnValidationIssues");
+    } else {
+        preset.pdfOptions.failOnValidationIssues = true;
+    }
+    if (RequireKey(values, "failOnPreflightErrors", raw)) {
+        if (!ParseBool(raw, preset.pdfOptions.failOnPreflightErrors)) return fail("failOnPreflightErrors");
+    } else {
+        preset.pdfOptions.failOnPreflightErrors = true;
+    }
+    if (RequireKey(values, "outputDirectory", preset.outputDirectory)) {
+        // Optional.
+    } else {
+        preset.outputDirectory.clear();
+    }
+    if (RequireKey(values, "outputStem", preset.outputStem)) {
+        // Optional.
+    } else {
+        preset.outputStem = "acrobat-imposition-run";
     }
 
     return true;

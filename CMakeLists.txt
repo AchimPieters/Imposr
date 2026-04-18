@@ -8,6 +8,7 @@ set(CMAKE_C_STANDARD 11)
 option(AIMP_BUILD_PLUGIN "Build the Acrobat plug-in target." ON)
 option(AIMP_BUILD_TESTS "Build planner tests." ON)
 option(AIMP_BUILD_CLI "Build the CLI app." ON)
+option(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER "Enable experimental native SDK composer adapter (plugin only)." OFF)
 
 if(NOT DEFINED ACROBAT_SDK_DIR)
   if(DEFINED ENV{ACROBAT_SDK_DIR})
@@ -56,6 +57,9 @@ if(AIMP_BUILD_PLUGIN)
     target_compile_definitions(${PLUGIN_NAME} PRIVATE WIN_PLATFORM _WINDOWS)
   elseif(APPLE)
     target_compile_definitions(${PLUGIN_NAME} PRIVATE MAC_PLATFORM)
+  endif()
+  if(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER)
+    target_compile_definitions(${PLUGIN_NAME} PRIVATE AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=1)
   endif()
 
   # Adobe's SDK requires PIMain.c from the SDK support files.

@@ -34,32 +34,13 @@ std::string EscapeJsonString(const std::string& input) {
     return out;
 }
 
-std::string BuildPreflightJson(const std::vector<aimp::PreflightIssue>& issues) {
-    std::ostringstream out;
-    out << "{\n";
-    out << "  \"status\": \"" << (issues.empty() ? "ok" : "issues") << "\",\n";
-    out << "  \"issues\": [\n";
-    for (std::size_t i = 0; i < issues.size(); ++i) {
-        const auto& issue = issues[i];
-        out << "    {\"severity\": \"" << (issue.isError ? "error" : "warning")
-            << "\", \"code\": \"" << EscapeJsonString(issue.code)
-            << "\", \"message\": \"" << EscapeJsonString(issue.message) << "\"}";
-        if (i + 1 < issues.size()) {
-            out << ',';
-        }
-        out << '\n';
-    }
-    out << "  ]\n";
-    out << "}\n";
-    return out.str();
-}
-
 std::string BuildJobReportJson(const std::string& mode,
                                std::uint32_t pages,
                                const std::string& outputPlanPath,
                                const std::string& outputAuditPath,
                                const std::string& outputManifestPath,
                                const std::string& outputAcrobatJsPath,
+                               const std::string& outputSdkOpsPath,
                                const std::string& outputCompositionPath,
                                const std::string& outputPdfPath,
                                const std::string& outputPreflightPath,
@@ -80,6 +61,7 @@ std::string BuildJobReportJson(const std::string& mode,
     out << "    \"auditXml\": \"" << EscapeJsonString(outputAuditPath) << "\",\n";
     out << "    \"manifestJson\": \"" << EscapeJsonString(outputManifestPath) << "\",\n";
     out << "    \"acrobatPlacementJs\": \"" << EscapeJsonString(outputAcrobatJsPath) << "\",\n";
+    out << "    \"acrobatSdkOpsJson\": \"" << EscapeJsonString(outputSdkOpsPath) << "\",\n";
     out << "    \"productionCompositionJson\": \"" << EscapeJsonString(outputCompositionPath) << "\",\n";
     out << "    \"proofPdf\": \"" << EscapeJsonString(outputPdfPath) << "\",\n";
     out << "    \"preflightJson\": \"" << EscapeJsonString(outputPreflightPath) << "\"\n";
@@ -110,7 +92,7 @@ void PrintUsage() {
         << "  imposr_cli tile --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--tile-overlap <pt>] [--out <file>]\n"
         << "  imposr_cli manual --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> --manual-sequence <csv>\n"
         << "  imposr_cli batch --batch-csv <jobs.csv> --output-dir <dir> [--batch-report-out <file.json>] [--batch-stop-on-error 0|1]\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--acrobat-js-out <file.js>] [--composition-out <file.json>] [--pdf-out <file.pdf>] [--job-out <file.json>] [--output-dir <dir>] [--output-stem <name>] [--stamp-output 0|1] [--batch-csv <jobs.csv>] [--batch-report-out <file.json>] [--batch-stop-on-error 0|1] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--pdf-overlay-template <text>] [--pdf-variable-csv <file.csv>] [--pdfx-profile none|pdfx-1a|pdfx-4] [--preflight 0|1] [--preflight-out <file.json>] [--fail-on-preflight 0|1] [--fail-on-quality-gate 0|1] [--summary 0|1] [--validate 0|1] [--fail-on-validation 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--acrobat-js-out <file.js>] [--sdk-ops-out <file.json>] [--composition-out <file.json>] [--pdf-out <file.pdf>] [--job-out <file.json>] [--output-dir <dir>] [--output-stem <name>] [--stamp-output 0|1] [--batch-csv <jobs.csv>] [--batch-report-out <file.json>] [--batch-stop-on-error 0|1] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--pdf-overlay-template <text>] [--pdf-variable-csv <file.csv>] [--pdfx-profile none|pdfx-1a|pdfx-4] [--preflight 0|1] [--preflight-out <file.json>] [--fail-on-preflight 0|1] [--fail-on-quality-gate 0|1] [--summary 0|1] [--validate 0|1] [--fail-on-validation 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -380,6 +362,7 @@ int main(int argc, char** argv) {
     std::string auditOutPath;
     std::string manifestOutPath;
     std::string acrobatJsOutPath;
+    std::string sdkOpsOutPath;
     std::string compositionOutPath;
     std::string preflightOutPath;
     std::string jobOutPath;
@@ -480,6 +463,8 @@ int main(int argc, char** argv) {
             manifestOutPath = value;
         } else if (key == "--acrobat-js-out") {
             acrobatJsOutPath = value;
+        } else if (key == "--sdk-ops-out") {
+            sdkOpsOutPath = value;
         } else if (key == "--composition-out") {
             compositionOutPath = value;
         } else if (key == "--job-out") {
@@ -838,6 +823,9 @@ int main(int argc, char** argv) {
         if (acrobatJsOutPath.empty()) {
             acrobatJsOutPath = base.string() + ".acrobat-placement.js";
         }
+        if (sdkOpsOutPath.empty()) {
+            sdkOpsOutPath = base.string() + ".sdk-ops.json";
+        }
         if (compositionOutPath.empty()) {
             compositionOutPath = base.string() + ".production-composition.json";
         }
@@ -888,6 +876,14 @@ int main(int argc, char** argv) {
             return 1;
         }
         file << aimp::ToAcrobatPlacementJs(plan);
+    }
+    if (!sdkOpsOutPath.empty()) {
+        std::ofstream file(sdkOpsOutPath);
+        if (!file) {
+            std::cerr << "Could not open SDK ops output file: " << sdkOpsOutPath << '\n';
+            return 1;
+        }
+        file << aimp::ToAcrobatSdkOpsJson(plan);
     }
     if (!compositionOutPath.empty()) {
         std::ofstream file(compositionOutPath);
@@ -970,7 +966,7 @@ int main(int argc, char** argv) {
             std::cerr << "Could not open preflight output file: " << preflightOutPath << '\n';
             return 1;
         }
-        file << BuildPreflightJson(preflightIssues);
+        file << aimp::ToPreflightJson(preflightIssues);
     }
 
     if (emitPreflight) {
@@ -1000,6 +996,7 @@ int main(int argc, char** argv) {
                                    auditOutPath,
                                    manifestOutPath,
                                    acrobatJsOutPath,
+                                   sdkOpsOutPath,
                                    compositionOutPath,
                                    pdfOutPath,
                                    preflightOutPath,

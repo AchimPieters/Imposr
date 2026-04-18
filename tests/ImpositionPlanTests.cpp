@@ -142,10 +142,21 @@ int main() {
         }
 
         const auto js = aimp::ToAcrobatPlacementJs(aimp::TwoUpPlanner::Build("a\"b", 1, {600.0, 800.0}, options));
-        if (js.find("acrobat-sdk") == std::string::npos ||
+        if (js.find("runAimpPlacement") == std::string::npos ||
+            js.find("adapter.placeSourcePage") == std::string::npos ||
+            js.find("runAimpPlacementWithAcrobatJs") == std::string::npos ||
+            js.find("addWatermarkFromFile") == std::string::npos ||
+            js.find("nRotation: rotationDegrees") == std::string::npos ||
             js.find("ctm: [0, 600, -300, 0, 300, 100]") == std::string::npos ||
             js.find("sourceDocId: \"a\\\"b\"") == std::string::npos) {
             return Fail("Acrobat placement JS should include rotated CTM handoff instructions.");
+        }
+        const auto sdkOps = aimp::ToAcrobatSdkOpsJson(aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options));
+        if (sdkOps.find("\"kind\": \"acrobat-sdk-placement-ops\"") == std::string::npos ||
+            sdkOps.find("\"op\": \"place-page\"") == std::string::npos ||
+            sdkOps.find("\"rotationDegrees\": 90") == std::string::npos ||
+            sdkOps.find("\"ctm\": {\"a\": ") == std::string::npos) {
+            return Fail("SDK ops JSON should include explicit place-page operations with CTM data.");
         }
 
         aimp::PdfComposeOptions pdfOptions {};
@@ -153,14 +164,32 @@ int main() {
         pdfOptions.drawBleedBox = true;
         pdfOptions.bleedPoints = 6.0;
         pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx4;
+        pdfOptions.overlayTemplate = "sheet={{sheet}} slot={{slot}} page={{page}} code={{code}}";
+        const std::string productionCsvPath = BuildTempPath("aimp_production_overlay.csv");
+        {
+            std::ofstream csvOut(productionCsvPath);
+            csvOut << "page,code\n";
+            csvOut << "1,ALPHA\n";
+        }
+        pdfOptions.variableDataCsvPath = productionCsvPath;
         const auto productionJson = aimp::ToProductionCompositionJson(
             aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
             options,
             pdfOptions);
         if (productionJson.find("\"kind\": \"acrobat-production-composition\"") == std::string::npos ||
             productionJson.find("\"pdfxProfile\": \"pdfx-4\"") == std::string::npos ||
-            productionJson.find("\"trimMarks\": true") == std::string::npos) {
+            productionJson.find("\"trimMarks\": true") == std::string::npos ||
+            productionJson.find("\"runtimeQualityGate\"") == std::string::npos ||
+            productionJson.find("\"resolvedOverlay\": \"sheet=1 slot=1 page=1 code=ALPHA\"") == std::string::npos) {
             return Fail("Production composition JSON should include prepress and profile settings.");
+        }
+
+        const auto preflightJson = aimp::ToPreflightJson(aimp::ValidatePrepressReadiness(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            pdfOptions));
+        if (preflightJson.find("\"status\": \"ok\"") == std::string::npos ||
+            preflightJson.find("\"errorCount\": 0") == std::string::npos) {
+            return Fail("Preflight JSON export should report status and errorCount.");
         }
     }
 
@@ -493,6 +522,10 @@ int main() {
         preset.pdfOptions.overlayTemplate = "job={{sheet}}/{{slot}}";
         preset.pdfOptions.variableDataCsvPath = "vars.csv";
         preset.pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx1a2001;
+        preset.pdfOptions.failOnValidationIssues = true;
+        preset.pdfOptions.failOnPreflightErrors = true;
+        preset.outputDirectory = "/tmp/imposr-out";
+        preset.outputStem = "job-alpha";
 
         std::string error;
         const std::string presetPath = BuildTempPath("aimp_test_preset.txt");
@@ -560,6 +593,12 @@ int main() {
         }
         if (loaded.pdfOptions.targetPdfxProfile != aimp::PdfxProfile::Pdfx1a2001) {
             return Fail("Loaded preset PDF/X profile mismatch.");
+        }
+        if (!loaded.pdfOptions.failOnValidationIssues || !loaded.pdfOptions.failOnPreflightErrors) {
+            return Fail("Loaded preset quality-gate options mismatch.");
+        }
+        if (loaded.outputDirectory != "/tmp/imposr-out" || loaded.outputStem != "job-alpha") {
+            return Fail("Loaded preset output destination options mismatch.");
         }
     }
 

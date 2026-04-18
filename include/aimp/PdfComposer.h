@@ -33,6 +33,8 @@ struct PdfComposeOptions {
     std::string overlayTemplate;
     std::string variableDataCsvPath;
     PdfxProfile targetPdfxProfile {PdfxProfile::None};
+    bool failOnValidationIssues {true};
+    bool failOnPreflightErrors {true};
 };
 
 struct PreflightIssue {
@@ -45,6 +47,7 @@ const char* PdfxProfileName(PdfxProfile profile);
 bool TryParsePdfxProfile(const std::string& value, PdfxProfile& outProfile);
 std::vector<PreflightIssue> ValidatePrepressReadiness(const ImpositionPlan& plan,
                                                       const PdfComposeOptions& options);
+std::string ToPreflightJson(const std::vector<PreflightIssue>& issues);
 std::string ToProductionCompositionJson(const ImpositionPlan& plan,
                                         const BuildOptions& buildOptions,
                                         const PdfComposeOptions& options);
