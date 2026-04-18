@@ -268,6 +268,10 @@ int RunBatchMode(const std::string& cliPath,
     std::uint32_t totalJobs = 0;
     std::uint32_t successJobs = 0;
     std::uint32_t failedJobs = 0;
+    std::string executablePath = TrimAscii(cliPath);
+    if (executablePath.size() >= 2 && executablePath.front() == '"' && executablePath.back() == '"') {
+        executablePath = executablePath.substr(1, executablePath.size() - 2);
+    }
     std::string line;
     while (std::getline(in, line)) {
         if (TrimAscii(line).empty()) {
@@ -295,7 +299,7 @@ int RunBatchMode(const std::string& cliPath,
         const std::string bleed = get("bleed", "0");
 
         std::ostringstream cmd;
-        cmd << '"' << cliPath << "\" " << mode
+        cmd << '"' << executablePath << "\" " << mode
             << " --pages " << pages
             << " --sheet-width " << sheetWidth
             << " --sheet-height " << sheetHeight
