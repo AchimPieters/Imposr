@@ -20,6 +20,8 @@ CHECKS = [
     ("preset_preview", "Preset preview"),
     ("preset_run_bundle", "Preset run bundle"),
     ("runtime_quality_gate", "Runtime quality gate"),
+    ("imposed_output_open", "Imposed output auto-open"),
+    ("panel_quick_actions", "Panel quick actions"),
 ]
 
 
@@ -44,8 +46,8 @@ def main() -> int:
     out = []
     out.append("# SDK Release Checklist\n")
     out.append("\n")
-    out.append("| OS | CPU | Status | Checks |\n")
-    out.append("|---|---|---|---|\n")
+    out.append("| OS | CPU | Status | Checks | Bundle | Proof | Imposed |\n")
+    out.append("|---|---|---|---|---|---|---|\n")
 
     for row in rows:
         os_name = row.get("os", "")
@@ -59,7 +61,10 @@ def main() -> int:
             if mark != "✅":
                 passed = False
         status = "PASS" if passed else "PENDING"
-        out.append(f"| {os_name} | {cpu} | {status} | {'<br>'.join(checks)} |\n")
+        bundle = row.get("bundle_path", "")
+        proof = row.get("proof_pdf_path", "")
+        imposed = row.get("imposed_output_path", "")
+        out.append(f"| {os_name} | {cpu} | {status} | {'<br>'.join(checks)} | {bundle} | {proof} | {imposed} |\n")
 
     out_path = Path(args.out)
     out_path.write_text("".join(out), encoding="utf-8")
@@ -69,4 +74,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

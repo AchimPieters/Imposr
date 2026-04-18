@@ -11,6 +11,11 @@
       "preset_preview": "pending",
       "preset_run_bundle": "pending",
       "runtime_quality_gate": "pending",
+      "imposed_output_open": "pending",
+      "panel_quick_actions": "pending",
+      "bundle_path": "",
+      "proof_pdf_path": "",
+      "imposed_output_path": "",
       "notes": ""
     },
     {
@@ -24,6 +29,11 @@
       "preset_preview": "pending",
       "preset_run_bundle": "pending",
       "runtime_quality_gate": "pending",
+      "imposed_output_open": "pending",
+      "panel_quick_actions": "pending",
+      "bundle_path": "",
+      "proof_pdf_path": "",
+      "imposed_output_path": "",
       "notes": ""
     },
     {
@@ -37,8 +47,12 @@
       "preset_preview": "pending",
       "preset_run_bundle": "pending",
       "runtime_quality_gate": "pending",
+      "imposed_output_open": "pending",
+      "panel_quick_actions": "pending",
+      "bundle_path": "",
+      "proof_pdf_path": "",
+      "imposed_output_path": "",
       "notes": ""
     }
   ]
 }
-

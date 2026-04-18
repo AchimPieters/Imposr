@@ -15,6 +15,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#if !defined(_WIN32)
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -196,16 +201,88 @@ std::string TrimAscii(std::string value) {
 
 std::string BuildBatchReportJson(std::uint32_t totalJobs,
                                  std::uint32_t successJobs,
-                                 std::uint32_t failedJobs) {
+                                 std::uint32_t failedJobs,
+                                 const std::vector<std::string>& jobEntries) {
     std::ostringstream out;
     out << "{\n";
     out << "  \"type\": \"imposr-batch-report\",\n";
     out << "  \"totalJobs\": " << totalJobs << ",\n";
     out << "  \"successJobs\": " << successJobs << ",\n";
     out << "  \"failedJobs\": " << failedJobs << ",\n";
-    out << "  \"status\": \"" << (failedJobs == 0 ? "ok" : "failed") << "\"\n";
+    out << "  \"status\": \"" << (failedJobs == 0 ? "ok" : "failed") << "\",\n";
+    out << "  \"jobs\": [\n";
+    for (std::size_t i = 0; i < jobEntries.size(); ++i) {
+        out << jobEntries[i];
+        if (i + 1 < jobEntries.size()) {
+            out << ",";
+        }
+        out << "\n";
+    }
+    out << "  ]\n";
     out << "}\n";
     return out.str();
+}
+
+std::string QuoteShellArg(const std::string& value) {
+    std::string out = "\"";
+    for (char ch : value) {
+        if (ch == '\\' || ch == '"') {
+            out.push_back('\\');
+        }
+        out.push_back(ch);
+    }
+    out.push_back('"');
+    return out;
+}
+
+std::string RenderCommandForLogs(const std::vector<std::string>& args) {
+    std::ostringstream out;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        if (i > 0) {
+            out << ' ';
+        }
+        out << QuoteShellArg(args[i]);
+    }
+    return out.str();
+}
+
+int RunProcess(const std::vector<std::string>& args, std::string& renderedCommand) {
+    renderedCommand = RenderCommandForLogs(args);
+    if (args.empty()) {
+        return 1;
+    }
+
+#if defined(_WIN32)
+    return std::system(renderedCommand.c_str());
+#else
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (const auto& arg : args) {
+        argv.push_back(const_cast<char*>(arg.c_str()));
+    }
+    argv.push_back(nullptr);
+
+    const pid_t pid = fork();
+    if (pid < 0) {
+        return 1;
+    }
+    if (pid == 0) {
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        return 1;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+#endif
 }
 
 int RunBatchMode(const std::string& cliPath,
@@ -250,6 +327,7 @@ int RunBatchMode(const std::string& cliPath,
     std::uint32_t totalJobs = 0;
     std::uint32_t successJobs = 0;
     std::uint32_t failedJobs = 0;
+    std::vector<std::string> jobReportEntries;
     std::string executablePath = TrimAscii(cliPath);
     if (executablePath.size() >= 2 && executablePath.front() == '"' && executablePath.back() == '"') {
         executablePath = executablePath.substr(1, executablePath.size() - 2);
@@ -279,32 +357,127 @@ int RunBatchMode(const std::string& cliPath,
         const std::string trimMarks = get("trim_marks", "0");
         const std::string bleedBox = get("bleed_box", "0");
         const std::string bleed = get("bleed", "0");
+        const std::string signatureSize = get("signature_size");
+        const std::string manualSequenceCsv = get("manual_sequence");
+        const std::string pageSequenceCsv = get("page_sequence");
+        const std::string reverseOrder = get("reverse");
+        const std::string pageFilter = get("filter");
+        const std::string padMultiple = get("pad_multiple");
+        const std::string creep = get("creep");
+        const std::string fitToSlot = get("fit_to_slot");
+        const std::string rotateToFit = get("rotate_to_fit");
+        const std::string sourcePageWidth = get("source_page_width");
+        const std::string sourcePageHeight = get("source_page_height");
+        const std::string overlayTemplate = get("pdf_overlay_template");
+        const std::string variableCsv = get("pdf_variable_csv");
+        const std::string preflight = get("preflight", "1");
+        const std::string summary = get("summary");
+        const std::string validate = get("validate");
+        const std::string failOnValidation = get("fail_on_validation");
+        const std::string failOnPreflight = get("fail_on_preflight");
+        const std::filesystem::path outputDirPath(outputDir);
+        const std::string jobOutPath = (outputDirPath / (outputStem + ".job.json")).string();
 
-        std::ostringstream cmd;
-        cmd << '"' << executablePath << "\" " << mode
-            << " --pages " << pages
-            << " --sheet-width " << sheetWidth
-            << " --sheet-height " << sheetHeight
-            << " --output-dir " << outputDir
-            << " --output-stem " << outputStem
-            << " --pdfx-profile " << pdfxProfile
-            << " --pdf-trim-marks " << trimMarks
-            << " --pdf-bleed-box " << bleedBox
-            << " --pdf-bleed " << bleed
-            << " --preflight 1";
+        std::vector<std::string> cmdArgs = {
+            executablePath,
+            mode,
+            "--pages", pages,
+            "--sheet-width", sheetWidth,
+            "--sheet-height", sheetHeight,
+            "--output-dir", outputDir,
+            "--output-stem", outputStem,
+            "--pdfx-profile", pdfxProfile,
+            "--pdf-trim-marks", trimMarks,
+            "--pdf-bleed-box", bleedBox,
+            "--pdf-bleed", bleed,
+            "--preflight", preflight,
+            "--job-out", jobOutPath
+        };
 
         if (!columns.empty()) {
-            cmd << " --columns " << columns;
+            cmdArgs.push_back("--columns");
+            cmdArgs.push_back(columns);
         }
         if (!rows.empty()) {
-            cmd << " --rows " << rows;
+            cmdArgs.push_back("--rows");
+            cmdArgs.push_back(rows);
+        }
+        if (!signatureSize.empty()) {
+            cmdArgs.push_back("--signature-size");
+            cmdArgs.push_back(signatureSize);
+        }
+        if (!manualSequenceCsv.empty()) {
+            cmdArgs.push_back("--manual-sequence");
+            cmdArgs.push_back(manualSequenceCsv);
+        }
+        if (!pageSequenceCsv.empty()) {
+            cmdArgs.push_back("--page-sequence");
+            cmdArgs.push_back(pageSequenceCsv);
+        }
+        if (!reverseOrder.empty()) {
+            cmdArgs.push_back("--reverse");
+            cmdArgs.push_back(reverseOrder);
+        }
+        if (!pageFilter.empty()) {
+            cmdArgs.push_back("--filter");
+            cmdArgs.push_back(pageFilter);
+        }
+        if (!padMultiple.empty()) {
+            cmdArgs.push_back("--pad-multiple");
+            cmdArgs.push_back(padMultiple);
+        }
+        if (!creep.empty()) {
+            cmdArgs.push_back("--creep");
+            cmdArgs.push_back(creep);
+        }
+        if (!fitToSlot.empty()) {
+            cmdArgs.push_back("--fit-to-slot");
+            cmdArgs.push_back(fitToSlot);
+        }
+        if (!rotateToFit.empty()) {
+            cmdArgs.push_back("--rotate-to-fit");
+            cmdArgs.push_back(rotateToFit);
+        }
+        if (!sourcePageWidth.empty()) {
+            cmdArgs.push_back("--source-page-width");
+            cmdArgs.push_back(sourcePageWidth);
+        }
+        if (!sourcePageHeight.empty()) {
+            cmdArgs.push_back("--source-page-height");
+            cmdArgs.push_back(sourcePageHeight);
+        }
+        if (!overlayTemplate.empty()) {
+            cmdArgs.push_back("--pdf-overlay-template");
+            cmdArgs.push_back(overlayTemplate);
+        }
+        if (!variableCsv.empty()) {
+            cmdArgs.push_back("--pdf-variable-csv");
+            cmdArgs.push_back(variableCsv);
+        }
+        if (!summary.empty()) {
+            cmdArgs.push_back("--summary");
+            cmdArgs.push_back(summary);
+        }
+        if (!validate.empty()) {
+            cmdArgs.push_back("--validate");
+            cmdArgs.push_back(validate);
+        }
+        if (!failOnValidation.empty()) {
+            cmdArgs.push_back("--fail-on-validation");
+            cmdArgs.push_back(failOnValidation);
+        }
+        if (!failOnPreflight.empty()) {
+            cmdArgs.push_back("--fail-on-preflight");
+            cmdArgs.push_back(failOnPreflight);
         }
         if (failOnQualityGate) {
-            cmd << " --fail-on-quality-gate 1";
+            cmdArgs.push_back("--fail-on-quality-gate");
+            cmdArgs.push_back("1");
         }
 
         ++totalJobs;
-        const int rc = std::system(cmd.str().c_str());
+        std::string commandLine;
+        const int rc = RunProcess(cmdArgs, commandLine);
         if (rc == 0) {
             ++successJobs;
         } else {
@@ -314,6 +487,17 @@ int RunBatchMode(const std::string& cliPath,
                 break;
             }
         }
+        std::ostringstream jobEntry;
+        jobEntry << "    {\n";
+        jobEntry << "      \"line\": " << totalJobs << ",\n";
+        jobEntry << "      \"mode\": \"" << EscapeJsonString(mode) << "\",\n";
+        jobEntry << "      \"outputStem\": \"" << EscapeJsonString(outputStem) << "\",\n";
+        jobEntry << "      \"jobReport\": \"" << EscapeJsonString(jobOutPath) << "\",\n";
+        jobEntry << "      \"exitCode\": " << rc << ",\n";
+        jobEntry << "      \"status\": \"" << (rc == 0 ? "ok" : "failed") << "\",\n";
+        jobEntry << "      \"command\": \"" << EscapeJsonString(commandLine) << "\"\n";
+        jobEntry << "    }";
+        jobReportEntries.push_back(jobEntry.str());
     }
 
     if (!batchReportOutPath.empty()) {
@@ -331,7 +515,7 @@ int RunBatchMode(const std::string& cliPath,
             std::cerr << "Could not open --batch-report-out: " << batchReportOutPath << '\n';
             return 1;
         }
-        out << BuildBatchReportJson(totalJobs, successJobs, failedJobs);
+        out << BuildBatchReportJson(totalJobs, successJobs, failedJobs, jobReportEntries);
     }
 
     return failedJobs == 0 ? 0 : 5;

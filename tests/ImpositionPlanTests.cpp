@@ -158,6 +158,69 @@ int main() {
             sdkOps.find("\"ctm\": {\"a\": ") == std::string::npos) {
             return Fail("SDK ops JSON should include explicit place-page operations with CTM data.");
         }
+        const auto xobjectJson = aimp::ToAcrobatXObjectComposeJson(
+            aimp::TwoUpPlanner::Build("doc", 4, {1000.0, 700.0}));
+        if (xobjectJson.find("\"kind\": \"acrobat-xobject-compose-plan\"") == std::string::npos ||
+            xobjectJson.find("\"sheetIndex\": 0") == std::string::npos ||
+            xobjectJson.find("\"sheetIndex\": 1") == std::string::npos ||
+            xobjectJson.find("\"slotIndex\": 1") == std::string::npos) {
+            return Fail("XObject compose JSON should group placements per sheet for native multi-placement wiring.");
+        }
+        std::vector<aimp::AcrobatSdkPlacementOp> parsedOps;
+        std::string parseError;
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.size() != 1) {
+            return Fail("SDK ops JSON parser should decode deterministic place-page rows.");
+        }
+        if (parsedOps[0].sheetIndex != 0 ||
+            parsedOps[0].slotIndex != 0 ||
+            parsedOps[0].sourcePageIndex != 0 ||
+            parsedOps[0].rotationDegrees != 90.0) {
+            return Fail("SDK ops parser should preserve core placement metadata.");
+        }
+        const auto parsedIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        if (!parsedIssues.empty()) {
+            return Fail("Valid SDK ops should pass native composition validation.");
+        }
+        parsedOps[0].slotIndex = 7;
+        const auto badIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        if (badIssues.empty()) {
+            return Fail("Invalid SDK ops slot topology should be detected by validation.");
+        }
+        parsedOps = {};
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
+            return Fail("SDK ops parser should still parse for CTM parity validation test.");
+        }
+        parsedOps[0].ctmE += 42.0;
+        const auto ctmParityIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        bool sawCtmParityIssue = false;
+        for (const auto& issue : ctmParityIssues) {
+            if (issue.code == "sdk-ops-ctm-parity-mismatch") {
+                sawCtmParityIssue = true;
+                break;
+            }
+        }
+        if (!sawCtmParityIssue) {
+            return Fail("SDK ops validation should detect CTM parity mismatches.");
+        }
+        const auto twoUpPlan = aimp::TwoUpPlanner::Build("doc", 4, {1000.0, 700.0});
+        const auto twoUpOpsJson = aimp::ToAcrobatSdkOpsJson(twoUpPlan);
+        std::vector<aimp::AcrobatSdkPlacementOp> twoUpOps;
+        if (!aimp::ParseAcrobatSdkOpsJson(twoUpOpsJson, twoUpOps, parseError)) {
+            return Fail("SDK ops parser should parse two-up plan JSON for bucket build test.");
+        }
+        std::vector<std::vector<aimp::AcrobatSdkPlacementOp>> buckets;
+        if (!aimp::BuildSheetComposeBuckets(twoUpPlan, twoUpOps, buckets, parseError)) {
+            return Fail("BuildSheetComposeBuckets should succeed on valid planner/sdk-op pairs.");
+        }
+        if (buckets.size() != 2 || buckets[0].size() != 2 || buckets[1].size() != 2) {
+            return Fail("BuildSheetComposeBuckets should group ops per sheet with deterministic slot cardinality.");
+        }
 
         aimp::PdfComposeOptions pdfOptions {};
         pdfOptions.drawTrimMarks = true;

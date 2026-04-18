@@ -27,6 +27,8 @@ REQUIRED_CHECKS = (
     "preset_preview",
     "preset_run_bundle",
     "runtime_quality_gate",
+    "imposed_output_open",
+    "panel_quick_actions",
 )
 
 
@@ -73,6 +75,11 @@ def main() -> int:
             if not _is_pass(value):
                 failed.append(f"{os_name} / {cpu}: {check}={value!r} (expected pass)")
 
+        for artifact_key in ("bundle_path", "proof_pdf_path", "imposed_output_path"):
+            artifact_value = str(row.get(artifact_key, "")).strip()
+            if artifact_value == "":
+                failed.append(f"{os_name} / {cpu}: missing evidence field {artifact_key}")
+
     if failed:
         print("SDK smoke release gate: FAILED")
         for issue in failed:
@@ -85,4 +92,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
