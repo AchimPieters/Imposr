@@ -1,0 +1,44 @@
+{
+  "rows": [
+    {
+      "os": "Windows 11 23H2",
+      "cpu": "x64",
+      "acrobat_version": "TBD",
+      "sdk_version": "TBD",
+      "plugin_load": "pending",
+      "menu_actions": "pending",
+      "preset_validate": "pending",
+      "preset_preview": "pending",
+      "preset_run_bundle": "pending",
+      "runtime_quality_gate": "pending",
+      "notes": ""
+    },
+    {
+      "os": "macOS 14 Sonoma",
+      "cpu": "arm64",
+      "acrobat_version": "TBD",
+      "sdk_version": "TBD",
+      "plugin_load": "pending",
+      "menu_actions": "pending",
+      "preset_validate": "pending",
+      "preset_preview": "pending",
+      "preset_run_bundle": "pending",
+      "runtime_quality_gate": "pending",
+      "notes": ""
+    },
+    {
+      "os": "macOS 14 Sonoma",
+      "cpu": "x64 (Rosetta/Intel)",
+      "acrobat_version": "TBD",
+      "sdk_version": "TBD",
+      "plugin_load": "pending",
+      "menu_actions": "pending",
+      "preset_validate": "pending",
+      "preset_preview": "pending",
+      "preset_run_bundle": "pending",
+      "runtime_quality_gate": "pending",
+      "notes": ""
+    }
+  ]
+}
+

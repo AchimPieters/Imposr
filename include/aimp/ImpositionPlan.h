@@ -164,6 +164,7 @@ const char* LayoutModeName(LayoutMode mode);
 std::string ToJson(const ImpositionPlan& plan);
 std::string ToPlacementManifestJson(const ImpositionPlan& plan);
 std::string ToAcrobatPlacementJs(const ImpositionPlan& plan);
+std::string ToAcrobatSdkOpsJson(const ImpositionPlan& plan);
 std::string ToAuditXml(const ImpositionPlan& plan);
 std::vector<PlacementRef> FindPlacementsForSourcePage(const ImpositionPlan& plan,
                                                       const std::string& sourceDocumentId,

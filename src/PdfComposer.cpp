@@ -297,15 +297,61 @@ std::vector<PreflightIssue> ValidatePrepressReadiness(const ImpositionPlan& plan
     return issues;
 }
 
+std::string ToPreflightJson(const std::vector<PreflightIssue>& issues) {
+    std::ostringstream out;
+    std::size_t errorCount = 0;
+    for (const auto& issue : issues) {
+        if (issue.isError) {
+            ++errorCount;
+        }
+    }
+
+    out << "{\n";
+    out << "  \"status\": \"" << (errorCount == 0 ? "ok" : "failed") << "\",\n";
+    out << "  \"issueCount\": " << issues.size() << ",\n";
+    out << "  \"errorCount\": " << errorCount << ",\n";
+    out << "  \"issues\": [\n";
+    for (std::size_t i = 0; i < issues.size(); ++i) {
+        const auto& issue = issues[i];
+        out << "    {\"severity\": \"" << (issue.isError ? "error" : "warning")
+            << "\", \"code\": \"" << EscapePdfText(issue.code)
+            << "\", \"message\": \"" << EscapePdfText(issue.message) << "\"}";
+        if (i + 1 < issues.size()) {
+            out << ',';
+        }
+        out << '\n';
+    }
+    out << "  ]\n";
+    out << "}\n";
+    return out.str();
+}
+
 std::string ToProductionCompositionJson(const ImpositionPlan& plan,
                                         const BuildOptions& buildOptions,
                                         const PdfComposeOptions& options) {
+    VariableByPageMap csvVariables;
+    std::string csvError;
+    const bool hasCsvVariables = LoadVariableDataCsv(options.variableDataCsvPath, csvVariables, csvError);
+    const auto preflightIssues = ValidatePrepressReadiness(plan, options);
+    std::size_t preflightErrorCount = 0;
+    for (const auto& issue : preflightIssues) {
+        if (issue.isError) {
+            ++preflightErrorCount;
+        }
+    }
+
     std::ostringstream out;
     out << "{\n";
     out << "  \"kind\": \"acrobat-production-composition\",\n";
     out << "  \"mode\": \"" << LayoutModeName(plan.mode) << "\",\n";
     out << "  \"sheet\": {\"widthPoints\": " << plan.outputSheet.widthPoints
         << ", \"heightPoints\": " << plan.outputSheet.heightPoints << "},\n";
+    out << "  \"runtimeQualityGate\": {\n";
+    out << "    \"failOnValidationIssues\": " << (options.failOnValidationIssues ? "true" : "false") << ",\n";
+    out << "    \"failOnPreflightErrors\": " << (options.failOnPreflightErrors ? "true" : "false") << ",\n";
+    out << "    \"preflightErrorCount\": " << preflightErrorCount << ",\n";
+    out << "    \"preflightStatus\": \"" << (preflightErrorCount == 0 ? "ok" : "failed") << "\"\n";
+    out << "  },\n";
     out << "  \"prepress\": {\n";
     out << "    \"pdfxProfile\": \"" << PdfxProfileName(options.targetPdfxProfile) << "\",\n";
     out << "    \"trimMarks\": " << (options.drawTrimMarks ? "true" : "false") << ",\n";
@@ -315,7 +361,9 @@ std::string ToProductionCompositionJson(const ImpositionPlan& plan,
     out << "    \"bleedPoints\": " << options.bleedPoints << ",\n";
     out << "    \"bookletCreepPerSheetPoints\": " << buildOptions.bookletCreepPerSheetPoints << ",\n";
     out << "    \"overlayTemplate\": \"" << EscapePdfText(options.overlayTemplate) << "\",\n";
-    out << "    \"variableDataCsvPath\": \"" << EscapePdfText(options.variableDataCsvPath) << "\"\n";
+    out << "    \"variableDataCsvPath\": \"" << EscapePdfText(options.variableDataCsvPath) << "\",\n";
+    out << "    \"csvLoaded\": " << (hasCsvVariables ? "true" : "false") << ",\n";
+    out << "    \"csvError\": \"" << EscapePdfText(csvError) << "\"\n";
     out << "  },\n";
     out << "  \"placements\": [\n";
     for (std::size_t i = 0; i < plan.placements.size(); ++i) {
@@ -347,10 +395,33 @@ std::string ToProductionCompositionJson(const ImpositionPlan& plan,
             f = p.targetRect.y + p.targetRect.height;
         }
 
+        VariableMap overlayVariables;
+        overlayVariables["sheet"] = std::to_string(p.sheetIndex + 1u);
+        overlayVariables["slot"] = std::to_string(p.slotIndex + 1u);
+        if (p.sourcePage.pageIndex != kBlankPageIndex) {
+            overlayVariables["page"] = std::to_string(p.sourcePage.pageIndex + 1u);
+        } else {
+            overlayVariables["page"] = "0";
+        }
+        if (hasCsvVariables && p.sourcePage.pageIndex != kBlankPageIndex) {
+            const auto csvIt = csvVariables.find(p.sourcePage.pageIndex);
+            if (csvIt != csvVariables.end()) {
+                for (const auto& kv : csvIt->second) {
+                    overlayVariables[kv.first] = kv.second;
+                }
+            }
+        }
+        const std::string resolvedOverlay = options.overlayTemplate.empty()
+            ? std::string {}
+            : ExpandOverlayTemplate(options.overlayTemplate, overlayVariables);
+
         out << "    {\"sheetIndex\": " << p.sheetIndex
             << ", \"slotIndex\": " << p.slotIndex
+            << ", \"sourceDocumentId\": \"" << EscapePdfText(p.sourcePage.sourceDocumentId) << "\""
             << ", \"sourcePageIndex\": " << p.sourcePage.pageIndex
+            << ", \"isBlank\": " << (p.sourcePage.pageIndex == kBlankPageIndex ? "true" : "false")
             << ", \"rotationDegrees\": " << p.rotationDegrees
+            << ", \"resolvedOverlay\": \"" << EscapePdfText(resolvedOverlay) << "\""
             << ", \"ctm\": {\"a\": " << a
             << ", \"b\": " << b
             << ", \"c\": " << c

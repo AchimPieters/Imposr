@@ -22,6 +22,8 @@ struct PlannerPreset {
     std::vector<std::uint32_t> manualSequence;
     BuildOptions buildOptions;
     PdfComposeOptions pdfOptions;
+    std::string outputDirectory;
+    std::string outputStem {"acrobat-imposition-run"};
 };
 
 bool SavePreset(const PlannerPreset& preset, const std::string& path, std::string& errorMessage);
