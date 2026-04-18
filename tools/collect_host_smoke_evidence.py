@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -52,10 +53,17 @@ def main() -> int:
         imposed = bundle / "imposed-output.pdf"
         panel_state = bundle / "panel-state.json"
         preflight = bundle / "preflight.json"
+        sdk_ops = bundle / "sdk-ops.json"
+        control_surface = bundle / "control-surface.json"
 
         row["bundle_path"] = str(bundle)
+        row["execution_mode"] = "host-runtime"
+        row["run_timestamp_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         row["proof_pdf_path"] = str(proof) if proof.exists() else ""
         row["imposed_output_path"] = str(imposed) if imposed.exists() else ""
+        row["preflight_json_path"] = str(preflight) if preflight.exists() else ""
+        row["sdk_ops_path"] = str(sdk_ops) if sdk_ops.exists() else ""
+        row["control_surface_path"] = str(control_surface) if control_surface.exists() else ""
 
         # Conservative auto-marking. Real host checks may still require manual confirmation.
         row["plugin_load"] = row.get("plugin_load", "pending")

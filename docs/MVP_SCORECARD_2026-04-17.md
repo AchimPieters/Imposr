@@ -2,7 +2,7 @@
 
 ## Current score
 
-**90 / 100**
+**91 / 100**
 
 This score reflects what is already production-like in planner/workflow logic versus what is still missing for a true Acrobat Pro MVP.
 
@@ -34,12 +34,12 @@ Subtotal: **20 / 20**
 Subtotal: **21 / 25**
 
 ### 4) Product UX in Acrobat — 15 pts
-- ⚠️ Menu-based preset save/preview/run/validate + quick-config flow exists; run/validate now emit panel-state snapshots, full panel/dialog still missing: **4 / 6**
+- ⚠️ Menu-based preset save/preview/run/validate + quick-config flow exists; panel dialog/state now covers extended layout+prepress+quality controls, but a native persistent panel/dialog is still missing: **5 / 6**
 - ⚠️ Output naming/destination controls are now preset-driven (path/stem), but not yet interactive dialog controls: **2 / 4**
 - ⚠️ Inline validation + preflight blocking feedback now shown in run flow and explicit validate action; proof opens automatically after run: **3 / 3**
 - ⚠️ Preset lifecycle (save/load) via menu flow: **2 / 2**
 
-Subtotal: **11 / 15**
+Subtotal: **12 / 15**
 
 ### 5) Prepress production features — 15 pts
 - ⚠️ Trim marks + bleed currently as proof visualization: **4 / 6**
@@ -57,7 +57,7 @@ Subtotal: **11 / 15**
    - Place actual source page content on destination sheets.
    - Save/open output document from inside Acrobat workflow.
 
-2. **Ship a minimal production UI panel in Acrobat (+10 pts).**
+2. **Ship a minimal production UI panel in Acrobat (+9 pts).**
    - Mode selector, sheet settings, preset picker.
    - Run/preview buttons and deterministic output location.
    - Inline validation feedback before execution.
@@ -79,7 +79,7 @@ Subtotal: **11 / 15**
 
 ---
 
-## Fastest path from 90 → 95
+## Fastest path from 91 → 95
 
 If only one milestone is prioritized next, deliver **real Acrobat page-content placement** first. That single milestone unlocks most of the blocked score in host integration and makes the UI work immediately more valuable.
 
@@ -111,3 +111,10 @@ If only one milestone is prioritized next, deliver **real Acrobat page-content p
 - Added panel dialog package export (schema + state) and artifact-driven host-smoke evidence collector to accelerate custom UI implementation and cross-platform release proof collection.
 - Added planner-validated per-sheet sdk-op bucketing for the native composer path, preparing deterministic one-sheet multi-placement execution order for final XObject matrix wiring.
 - Added `xobject-compose.json` run-bundle artifact and a unified dialog package opener to tighten the final mile for host-side XObject execution + single-screen panel UX.
+- Expanded panel dialog/state schema + apply-state handling with additional production controls (fit/rotate/filter/creep/trim geometry/PDF-X) plus preset normalization guards, reducing manual preset text edits in MVP operations.
+- Moved panel-state apply into reusable core parser logic (`ApplyPanelStateJsonToPreset`) with scoped section parsing and test coverage, improving reliability of the MVP dialog round-trip path.
+- Hardened panel-state parsing against edge cases (escaped strings with braces + strict integer handling for rows/columns) and added regression tests for these failure modes.
+- Added `control-surface.json` run-bundle contract so native panel implementations can bind to deterministic actions/state/quality defaults without reverse-engineering menu flow.
+- Expanded production composition JSON with per-sheet `executionPlan` and `prepressOps` blocks to make native SDK page-placement + marks/bleed behavior explicit in one artifact.
+- Tightened SDK smoke gates with required runtime metadata (`run_timestamp_utc`) and artifact-path evidence (`preflight/sdk-ops/control-surface`) plus an auto-generated matrix status report.
+- Added a simulated-runtime smoke evidence generator so the full matrix gate can be executed in container/CI without Acrobat host access, using the same validation/reporting contract.

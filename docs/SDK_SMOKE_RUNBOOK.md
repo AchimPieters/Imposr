@@ -50,6 +50,7 @@ Voer onderstaande op elke doelrij uit:
    - `manifest.json`
    - `sdk-ops.json`
    - `xobject-compose.json`
+   - `control-surface.json`
    - `production-composition.json`
    - `preflight.json`
    - `proof.pdf`
@@ -65,13 +66,27 @@ Voer onderstaande op elke doelrij uit:
 
 1. Vul `docs/sdk_smoke_evidence.template.json` in naar `docs/sdk_smoke_evidence.json`.
    - Vul ook `bundle_path`, `proof_pdf_path` en `imposed_output_path` per matrix-rij in.
+   - Vul ook metadata: `acrobat_version`, `sdk_version`, `run_timestamp_utc`.
 2. Valideer gate:
    - `python3 tools/validate_sdk_smoke.py --evidence docs/sdk_smoke_evidence.json`
 3. Genereer checklist:
    - `python3 tools/generate_release_checklist.py --evidence docs/sdk_smoke_evidence.json --out docs/RELEASE_CHECKLIST.md`
-4. (Optioneel) vul/actualiseer één matrix-rij geautomatiseerd:
+4. Genereer matrix statusrapport:
+   - `python3 tools/generate_sdk_matrix_report.py --evidence docs/sdk_smoke_evidence.json --out docs/SDK_SMOKE_MATRIX_REPORT.md`
+5. (Optioneel) vul/actualiseer één matrix-rij geautomatiseerd:
    - `python3 tools/upsert_sdk_smoke_row.py --evidence docs/sdk_smoke_evidence.json --os \"Windows 11 23H2\" --cpu \"x64\" --set plugin_load=pass --set menu_actions=pass --set preset_validate=pass --set preset_preview=pass --set preset_run_bundle=pass --set runtime_quality_gate=pass --set imposed_output_open=pass --set panel_quick_actions=pass --set bundle_path=C:/evidence/run-001 --set proof_pdf_path=C:/evidence/run-001/proof.pdf --set imposed_output_path=C:/evidence/run-001/imposed-output.pdf`
-5. (Optioneel) auto-collect vanuit bundle mappen:
+6. (Optioneel) auto-collect vanuit bundle mappen:
    - `python3 tools/collect_host_smoke_evidence.py --evidence docs/sdk_smoke_evidence.json --row \"Windows 11 23H2|x64|C:/evidence/run-001\"`
 
 Release is alleen **GO** als alle vereiste checks op pass staan voor alle matrix-rijen.
+
+## 4) Container/CI simulated-runtime pad (zonder Acrobat host)
+
+Wanneer echte host-executie niet beschikbaar is, kun je dezelfde gate-structuur volledig doorlopen met gesimuleerde runtime-evidence:
+
+1. Genereer simulated evidence + placeholder artifacts:
+   - `python3 tools/generate_simulated_sdk_smoke_evidence.py --out docs/sdk_smoke_evidence.simulated.json --artifact-root /tmp/aimp-simulated-smoke`
+2. Valideer exact dezelfde smoke gate:
+   - `python3 tools/validate_sdk_smoke.py --evidence docs/sdk_smoke_evidence.simulated.json`
+3. Genereer matrixrapport:
+   - `python3 tools/generate_sdk_matrix_report.py --evidence docs/sdk_smoke_evidence.simulated.json --out docs/SDK_SMOKE_MATRIX_REPORT.simulated.md`

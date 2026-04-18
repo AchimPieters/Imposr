@@ -70,8 +70,15 @@
 - panel quick-actions now cover quality gate toggling plus explicit A4/A3 sheet presets, moving menu-driven UX closer to a complete control surface
 - panel-state payload now carries editable layout/prepress controls (columns/rows/trim/bleed/quality) and apply-state consumes those fields for persistent round-trip editing
 - plug-in now exports a panel dialog package (state + schema JSON) to bootstrap a single-screen custom UI implementation path with explicit control definitions
+- panel dialog/state round-trip now also supports fit/rotate/filter/creep/PDF-X and trim-length/offset controls with preset normalization safeguards, reducing manual preset-editing for MVP operations
+- panel-state apply pipeline is now moved into testable core logic (`ApplyPanelStateJsonToPreset`) with scoped sheet/preset parsing + normalization warnings, reducing host-only regression risk
+- panel-state parser now guards against malformed numeric payloads (non-integer row/column values) and string-embedded brace edge cases, increasing reliability for externally edited dialog JSON
 - native composer ingest now builds deterministic per-sheet sdk-op buckets (slot-sorted) as the execution backbone for one-sheet multi-placement XObject wiring
 - run-bundle now emits `xobject-compose.json` as an explicit per-sheet matrix/XObject execution contract artifact for host-side SDK composer implementation
+- run-bundle now emits `control-surface.json` as a native panel action/state contract (validate/preview/run/apply/open-dialog + quality gate defaults)
+- production composition manifest now includes explicit `executionPlan.sheets[*].composeOrder` and `prepressOps` blocks to bridge native SDK placement + marks/bleed behavior per sheet
+- smoke evidence gates now enforce metadata + artifact completeness (`run_timestamp_utc`, preflight/sdk-ops/control-surface paths) with matrix markdown reporting
+- SDK smoke workflow now supports a simulated-runtime evidence mode for container/CI signoff when Acrobat host runtime is unavailable, while preserving the same matrix gate schema
 
 ### Product MVP gaps
 - no production control panel yet
@@ -110,6 +117,7 @@
 - successful run-bundle flow now attempts to open generated proof PDF automatically in Acrobat
 - run/validate flows now emit `panel-state.json` snapshot to accelerate implementation of a full persistent panel/dialog UI
 - CLI now supports a combined quality gate (`--fail-on-quality-gate`) and consolidated job report artifacts that should be surfaced in Acrobat UI
+- panel dialog package now exposes additional production controls (fit/rotate/filter/creep/trim geometry/PDF-X), so the remaining UX gap is mostly native persistent rendering and action wiring
 
 ### M4 — Prepress extras
 - crop marks / trim marks

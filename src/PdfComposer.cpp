@@ -365,6 +365,48 @@ std::string ToProductionCompositionJson(const ImpositionPlan& plan,
     out << "    \"csvLoaded\": " << (hasCsvVariables ? "true" : "false") << ",\n";
     out << "    \"csvError\": \"" << EscapePdfText(csvError) << "\"\n";
     out << "  },\n";
+    out << "  \"executionPlan\": {\n";
+    out << "    \"engine\": \"acrobat-sdk-native\",\n";
+    out << "    \"sheetCount\": " << SheetCount(plan) << ",\n";
+    out << "    \"sheets\": [\n";
+    const std::size_t sheetCount = SheetCount(plan);
+    for (std::size_t sheetIndex = 0; sheetIndex < sheetCount; ++sheetIndex) {
+        out << "      {\n";
+        out << "        \"sheetIndex\": " << sheetIndex << ",\n";
+        out << "        \"composeOrder\": [\n";
+        bool firstSheetPlacement = true;
+        for (const auto& p : plan.placements) {
+            if (p.sheetIndex != sheetIndex) {
+                continue;
+            }
+            if (!firstSheetPlacement) {
+                out << ",\n";
+            }
+            out << "          {\"slotIndex\": " << p.slotIndex
+                << ", \"isBlank\": " << (p.sourcePage.pageIndex == kBlankPageIndex ? "true" : "false")
+                << ", \"targetRect\": {\"x\": " << p.targetRect.x
+                << ", \"y\": " << p.targetRect.y
+                << ", \"width\": " << p.targetRect.width
+                << ", \"height\": " << p.targetRect.height << "}}";
+            firstSheetPlacement = false;
+        }
+        out << "\n";
+        out << "        ],\n";
+        out << "        \"prepressOps\": {\n";
+        out << "          \"trimMarks\": " << (options.drawTrimMarks ? "true" : "false") << ",\n";
+        out << "          \"trimMarkLengthPoints\": " << options.trimMarkLengthPoints << ",\n";
+        out << "          \"trimMarkOffsetPoints\": " << options.trimMarkOffsetPoints << ",\n";
+        out << "          \"bleedBox\": " << (options.drawBleedBox ? "true" : "false") << ",\n";
+        out << "          \"bleedPoints\": " << options.bleedPoints << "\n";
+        out << "        }\n";
+        out << "      }";
+        if (sheetIndex + 1 < sheetCount) {
+            out << ",";
+        }
+        out << "\n";
+    }
+    out << "    ]\n";
+    out << "  },\n";
     out << "  \"placements\": [\n";
     for (std::size_t i = 0; i < plan.placements.size(); ++i) {
         const auto& p = plan.placements[i];
