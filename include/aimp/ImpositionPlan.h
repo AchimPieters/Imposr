@@ -78,6 +78,23 @@ struct ValidationIssue {
     std::string message;
 };
 
+struct AcrobatSdkPlacementOp {
+    std::uint32_t sheetIndex {0};
+    std::uint32_t slotIndex {0};
+    bool isBlank {true};
+    std::string sourceDocumentId;
+    std::uint32_t sourcePageIndex {kBlankPageIndex};
+    double rotationDegrees {0.0};
+    double scale {1.0};
+    Rect targetRect;
+    double ctmA {1.0};
+    double ctmB {0.0};
+    double ctmC {0.0};
+    double ctmD {1.0};
+    double ctmE {0.0};
+    double ctmF {0.0};
+};
+
 struct StepRepeatConfig {
     std::uint32_t repeatX {1};
     std::uint32_t repeatY {1};
@@ -165,6 +182,16 @@ std::string ToJson(const ImpositionPlan& plan);
 std::string ToPlacementManifestJson(const ImpositionPlan& plan);
 std::string ToAcrobatPlacementJs(const ImpositionPlan& plan);
 std::string ToAcrobatSdkOpsJson(const ImpositionPlan& plan);
+std::string ToAcrobatXObjectComposeJson(const ImpositionPlan& plan);
+bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
+                            std::vector<AcrobatSdkPlacementOp>& outOps,
+                            std::string& errorMessage);
+std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
+                                                   const std::vector<AcrobatSdkPlacementOp>& ops);
+bool BuildSheetComposeBuckets(const ImpositionPlan& plan,
+                              const std::vector<AcrobatSdkPlacementOp>& ops,
+                              std::vector<std::vector<AcrobatSdkPlacementOp>>& outBuckets,
+                              std::string& errorMessage);
 std::string ToAuditXml(const ImpositionPlan& plan);
 std::vector<PlacementRef> FindPlacementsForSourcePage(const ImpositionPlan& plan,
                                                       const std::string& sourceDocumentId,

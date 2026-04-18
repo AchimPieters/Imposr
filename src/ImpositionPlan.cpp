@@ -1,9 +1,13 @@
 #include "aimp/ImpositionPlan.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
+#include <map>
+#include <regex>
 #include <sstream>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -802,6 +806,326 @@ std::string ToAcrobatSdkOpsJson(const ImpositionPlan& plan) {
     out << "  ]\n";
     out << "}\n";
     return out.str();
+}
+
+std::string ToAcrobatXObjectComposeJson(const ImpositionPlan& plan) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"kind\": \"acrobat-xobject-compose-plan\",\n";
+    out << "  \"sheet\": {\"widthPoints\": " << plan.outputSheet.widthPoints
+        << ", \"heightPoints\": " << plan.outputSheet.heightPoints << "},\n";
+    out << "  \"sheets\": [\n";
+
+    const std::uint32_t sheetCount = plan.placements.empty()
+        ? 0u
+        : (std::max_element(plan.placements.begin(), plan.placements.end(),
+                            [](const SlotPlacement& a, const SlotPlacement& b) {
+                                return a.sheetIndex < b.sheetIndex;
+                            })->sheetIndex + 1u);
+    for (std::uint32_t sheetIndex = 0; sheetIndex < sheetCount; ++sheetIndex) {
+        out << "    {\n";
+        out << "      \"sheetIndex\": " << sheetIndex << ",\n";
+        out << "      \"placements\": [\n";
+        bool firstPlacement = true;
+        for (const auto& p : plan.placements) {
+            if (p.sheetIndex != sheetIndex) {
+                continue;
+            }
+            if (!firstPlacement) {
+                out << ",\n";
+            }
+            firstPlacement = false;
+            const PlacementCtm ctm = BuildPlacementCtm(p);
+            out << "        {\"slotIndex\": " << p.slotIndex
+                << ", \"isBlank\": " << (p.sourcePage.pageIndex == kBlankPageIndex ? "true" : "false")
+                << ", \"sourcePageIndex\": " << p.sourcePage.pageIndex
+                << ", \"rotationDegrees\": " << p.rotationDegrees
+                << ", \"targetRect\": {\"x\": " << p.targetRect.x
+                << ", \"y\": " << p.targetRect.y
+                << ", \"width\": " << p.targetRect.width
+                << ", \"height\": " << p.targetRect.height << "}"
+                << ", \"ctm\": {\"a\": " << ctm.a
+                << ", \"b\": " << ctm.b
+                << ", \"c\": " << ctm.c
+                << ", \"d\": " << ctm.d
+                << ", \"e\": " << ctm.e
+                << ", \"f\": " << ctm.f << "}}";
+        }
+        out << "\n      ]\n";
+        out << "    }";
+        if (sheetIndex + 1u < sheetCount) {
+            out << ",";
+        }
+        out << "\n";
+    }
+    out << "  ]\n";
+    out << "}\n";
+    return out.str();
+}
+
+bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
+                            std::vector<AcrobatSdkPlacementOp>& outOps,
+                            std::string& errorMessage) {
+    outOps.clear();
+    errorMessage.clear();
+    const std::regex uintField("\"([A-Za-z]+)\"\\s*:\\s*(\\d+)");
+    const std::regex boolField("\"isBlank\"\\s*:\\s*(true|false)");
+    const std::regex stringField("\"documentId\"\\s*:\\s*\"([^\"]*)\"");
+    const std::regex doubleField("\"([A-Za-z]+)\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
+
+    std::vector<std::string> opRows;
+    std::size_t searchPos = 0;
+    while (true) {
+        const std::size_t opPos = sdkOpsJson.find("\"op\"", searchPos);
+        if (opPos == std::string::npos) {
+            break;
+        }
+        const std::size_t placePagePos = sdkOpsJson.find("\"place-page\"", opPos);
+        if (placePagePos == std::string::npos || placePagePos > opPos + 64) {
+            searchPos = opPos + 4;
+            continue;
+        }
+
+        std::size_t start = opPos;
+        int backDepth = 0;
+        bool foundStart = false;
+        while (start > 0) {
+            --start;
+            const char ch = sdkOpsJson[start];
+            if (ch == '}') {
+                ++backDepth;
+            } else if (ch == '{') {
+                if (backDepth == 0) {
+                    foundStart = true;
+                    break;
+                }
+                --backDepth;
+            }
+        }
+        if (!foundStart) {
+            searchPos = opPos + 4;
+            continue;
+        }
+
+        std::size_t endPos = start;
+        int forwardDepth = 0;
+        bool foundEnd = false;
+        while (endPos < sdkOpsJson.size()) {
+            const char ch = sdkOpsJson[endPos];
+            if (ch == '{') {
+                ++forwardDepth;
+            } else if (ch == '}') {
+                --forwardDepth;
+                if (forwardDepth == 0) {
+                    foundEnd = true;
+                    break;
+                }
+            }
+            ++endPos;
+        }
+        if (foundEnd && endPos < sdkOpsJson.size()) {
+            opRows.push_back(sdkOpsJson.substr(start, (endPos - start) + 1));
+            searchPos = endPos + 1;
+        } else {
+            searchPos = opPos + 4;
+        }
+    }
+
+    auto end = std::sregex_iterator();
+    for (const auto& row : opRows) {
+        AcrobatSdkPlacementOp op {};
+        std::map<std::string, std::uint32_t> uints;
+        std::map<std::string, double> doubles;
+
+        for (auto u = std::sregex_iterator(row.begin(), row.end(), uintField); u != end; ++u) {
+            const std::string key = (*u)[1].str();
+            const std::uint32_t value = static_cast<std::uint32_t>(std::stoul((*u)[2].str()));
+            uints[key] = value;
+        }
+        for (auto d = std::sregex_iterator(row.begin(), row.end(), doubleField); d != end; ++d) {
+            const std::string key = (*d)[1].str();
+            const double value = std::stod((*d)[2].str());
+            doubles[key] = value;
+        }
+
+        std::smatch boolMatch;
+        if (std::regex_search(row, boolMatch, boolField)) {
+            op.isBlank = boolMatch[1].str() == "true";
+        }
+
+        std::smatch docMatch;
+        if (std::regex_search(row, docMatch, stringField)) {
+            op.sourceDocumentId = docMatch[1].str();
+        }
+
+        if (uints.find("sheetIndex") == uints.end() ||
+            uints.find("slotIndex") == uints.end() ||
+            uints.find("pageIndex") == uints.end()) {
+            errorMessage = "sdk-ops parse error: missing sheetIndex/slotIndex/pageIndex.";
+            outOps.clear();
+            return false;
+        }
+
+        op.sheetIndex = uints["sheetIndex"];
+        op.slotIndex = uints["slotIndex"];
+        op.sourcePageIndex = uints["pageIndex"];
+        op.isBlank = op.isBlank || op.sourcePageIndex == kBlankPageIndex;
+
+        if (doubles.find("rotationDegrees") != doubles.end()) {
+            op.rotationDegrees = doubles["rotationDegrees"];
+        }
+        if (doubles.find("scale") != doubles.end()) {
+            op.scale = doubles["scale"];
+        }
+        if (doubles.find("x") != doubles.end()) {
+            op.targetRect.x = doubles["x"];
+        }
+        if (doubles.find("y") != doubles.end()) {
+            op.targetRect.y = doubles["y"];
+        }
+        if (doubles.find("width") != doubles.end()) {
+            op.targetRect.width = doubles["width"];
+        }
+        if (doubles.find("height") != doubles.end()) {
+            op.targetRect.height = doubles["height"];
+        }
+        if (doubles.find("a") != doubles.end()) {
+            op.ctmA = doubles["a"];
+        }
+        if (doubles.find("b") != doubles.end()) {
+            op.ctmB = doubles["b"];
+        }
+        if (doubles.find("c") != doubles.end()) {
+            op.ctmC = doubles["c"];
+        }
+        if (doubles.find("d") != doubles.end()) {
+            op.ctmD = doubles["d"];
+        }
+        if (doubles.find("e") != doubles.end()) {
+            op.ctmE = doubles["e"];
+        }
+        if (doubles.find("f") != doubles.end()) {
+            op.ctmF = doubles["f"];
+        }
+
+        outOps.push_back(op);
+    }
+
+    if (outOps.empty()) {
+        errorMessage = "sdk-ops parse error: no place-page operations found.";
+        return false;
+    }
+    return true;
+}
+
+std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
+                                                   const std::vector<AcrobatSdkPlacementOp>& ops) {
+    const auto nearlyEqual = [](double a, double b, double eps = 0.01) {
+        return std::abs(a - b) <= eps;
+    };
+    const auto expectedFromRectAndRotation = [](const AcrobatSdkPlacementOp& op) {
+        PlacementCtm ctm {};
+        ctm.a = op.targetRect.width;
+        ctm.d = op.targetRect.height;
+        ctm.e = op.targetRect.x;
+        ctm.f = op.targetRect.y;
+        const double rot = std::fmod(op.rotationDegrees, 360.0);
+        if (rot == 90.0 || rot == -270.0) {
+            ctm.a = 0.0;
+            ctm.b = op.targetRect.height;
+            ctm.c = -op.targetRect.width;
+            ctm.d = 0.0;
+            ctm.e = op.targetRect.x + op.targetRect.width;
+            ctm.f = op.targetRect.y;
+        } else if (rot == 180.0 || rot == -180.0) {
+            ctm.a = -op.targetRect.width;
+            ctm.d = -op.targetRect.height;
+            ctm.e = op.targetRect.x + op.targetRect.width;
+            ctm.f = op.targetRect.y + op.targetRect.height;
+        } else if (rot == 270.0 || rot == -90.0) {
+            ctm.a = 0.0;
+            ctm.b = -op.targetRect.height;
+            ctm.c = op.targetRect.width;
+            ctm.d = 0.0;
+            ctm.e = op.targetRect.x;
+            ctm.f = op.targetRect.y + op.targetRect.height;
+        }
+        return ctm;
+    };
+
+    std::vector<ValidationIssue> issues;
+    if (ops.size() != plan.placements.size()) {
+        issues.push_back({"sdk-ops-count-mismatch", "Number of sdk-ops placements differs from planner placements."});
+    }
+
+    std::set<std::pair<std::uint32_t, std::uint32_t>> expectedSheetSlots;
+    for (const auto& placement : plan.placements) {
+        expectedSheetSlots.insert({placement.sheetIndex, placement.slotIndex});
+    }
+    std::set<std::pair<std::uint32_t, std::uint32_t>> seenSheetSlots;
+    for (const auto& op : ops) {
+        const auto key = std::make_pair(op.sheetIndex, op.slotIndex);
+        if (!seenSheetSlots.insert(key).second) {
+            issues.push_back({"sdk-ops-duplicate-slot", "Duplicate sheetIndex/slotIndex pair in sdk-ops."});
+        }
+        if (!expectedSheetSlots.empty() && expectedSheetSlots.find(key) == expectedSheetSlots.end()) {
+            issues.push_back({"sdk-ops-unexpected-slot", "sdk-ops contains a sheetIndex/slotIndex pair not present in planner output."});
+        }
+        if (!op.isBlank && op.sourcePageIndex >= plan.sourcePageCount) {
+            issues.push_back({"sdk-ops-invalid-source-page", "sdk-ops references source page outside sourcePageCount."});
+        }
+        if (op.targetRect.width <= 0.0 || op.targetRect.height <= 0.0) {
+            issues.push_back({"sdk-ops-invalid-target-rect", "sdk-ops targetRect must have positive width/height."});
+        }
+        const PlacementCtm expected = expectedFromRectAndRotation(op);
+        if (!nearlyEqual(op.ctmA, expected.a) ||
+            !nearlyEqual(op.ctmB, expected.b) ||
+            !nearlyEqual(op.ctmC, expected.c) ||
+            !nearlyEqual(op.ctmD, expected.d) ||
+            !nearlyEqual(op.ctmE, expected.e) ||
+            !nearlyEqual(op.ctmF, expected.f)) {
+            issues.push_back({"sdk-ops-ctm-parity-mismatch", "sdk-ops CTM does not match planner targetRect/rotation parity expectations."});
+        }
+    }
+
+    return issues;
+}
+
+bool BuildSheetComposeBuckets(const ImpositionPlan& plan,
+                              const std::vector<AcrobatSdkPlacementOp>& ops,
+                              std::vector<std::vector<AcrobatSdkPlacementOp>>& outBuckets,
+                              std::string& errorMessage) {
+    outBuckets.clear();
+    errorMessage.clear();
+
+    const auto issues = ValidateAcrobatSdkOps(plan, ops);
+    if (!issues.empty()) {
+        errorMessage = "Cannot build sheet compose buckets because sdk-ops validation failed.";
+        return false;
+    }
+
+    std::uint32_t sheetCount = 0;
+    for (const auto& placement : plan.placements) {
+        sheetCount = std::max(sheetCount, placement.sheetIndex + 1u);
+    }
+    outBuckets.resize(sheetCount);
+
+    for (const auto& op : ops) {
+        if (op.sheetIndex >= outBuckets.size()) {
+            errorMessage = "sdk-ops sheet index is out of planner sheet range.";
+            outBuckets.clear();
+            return false;
+        }
+        outBuckets[op.sheetIndex].push_back(op);
+    }
+
+    for (auto& sheetOps : outBuckets) {
+        std::sort(sheetOps.begin(), sheetOps.end(), [](const AcrobatSdkPlacementOp& a, const AcrobatSdkPlacementOp& b) {
+            return a.slotIndex < b.slotIndex;
+        });
+    }
+
+    return true;
 }
 
 std::string ToAuditXml(const ImpositionPlan& plan) {

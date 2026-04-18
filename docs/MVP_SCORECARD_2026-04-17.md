@@ -99,3 +99,15 @@ If only one milestone is prioritized next, deliver **real Acrobat page-content p
 - Added a compile-flagged experimental native SDK composer adapter that consumes `sdk-ops.json` and emits a first-pass imposed output document.
 - Experimental SDK composer now consumes transform metadata and applies per-placement rotation while keeping CTM/XObject parity as the remaining gap.
 - Experimental SDK composer now prefers planner `targetRect` destination geometry, with CTM-derived crop/media fallback for backward compatibility.
+- Batch CSV orchestration now writes per-job deterministic job reports automatically and records executed command traces + exit status per row in `batch-report-out` for CI and hot-folder triage.
+- Batch CSV now supports richer per-job planner/prepress overrides (signature/manual sequence/page sequence/filter/reverse/padding/creep/fit/rotation/source size/overlay CSV/preflight-validation gates), reducing reliance on one-off wrapper scripts.
+- Acrobat run-bundle now attempts to auto-open the native imposed output document whenever the experimental SDK composer succeeds.
+- Added panel-style quick actions in Acrobat menu flow (`Cycle layout`, `Toggle trim+bleed`, `Set output temp`, `Show state`) plus shared panel-state snapshot persistence to accelerate full dialog UI delivery.
+- Hardened batch CSV execution path by switching POSIX batch runs from shell command evaluation to direct process spawn (`fork/exec`), while preserving deterministic per-job command traces in reports.
+- Added parser + validator for `sdk-ops.json` in core planner library and wired the experimental native SDK composer to gate on planner-topology parity before compose execution.
+- Added `Panel: Apply state` to round-trip edited panel-state snapshots back into presets, plus stricter cross-platform smoke evidence gates for imposed-output open, panel actions, and artifact-path completeness.
+- Expanded panel quick-actions with quality-gate toggle and A4/A3 sheet presets to close more of the missing interactive control-surface gap while full dialog UI is finalized.
+- Extended panel-state round-trip with editable layout/prepress fields (columns/rows/trim/bleed/quality) plus a CLI helper to upsert real host smoke evidence rows for faster Win/mac pass-tracking.
+- Added panel dialog package export (schema + state) and artifact-driven host-smoke evidence collector to accelerate custom UI implementation and cross-platform release proof collection.
+- Added planner-validated per-sheet sdk-op bucketing for the native composer path, preparing deterministic one-sheet multi-placement execution order for final XObject matrix wiring.
+- Added `xobject-compose.json` run-bundle artifact and a unified dialog package opener to tighten the final mile for host-side XObject execution + single-screen panel UX.

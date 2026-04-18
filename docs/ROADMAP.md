@@ -41,6 +41,8 @@
 - emit Acrobat placement handoff JavaScript (`--acrobat-js-out`) derived from planner CTM data for faster SDK integration
 - emit production composition manifest (`--composition-out`) including prepress intent (trim/bleed/creep/overlay/CSV/PDF-X) for Acrobat SDK execution
 - run multi-job batch orchestration from CSV (`batch` mode + `--batch-csv`) with batch report output for hot-folder style processing
+- batch orchestration now auto-emits per-job deterministic `job-out` artifacts and embeds executed command traces/status rows in batch report JSON for CI/retry diagnostics
+- batch orchestration now uses direct process spawning on POSIX (fork/exec) instead of shell-evaluated command strings, reducing injection risk for CSV-driven automation
 - inspect source page usage and placement reverse lookup
 - smoke-tested in CI-style local builds
 
@@ -62,6 +64,14 @@
 - current proof PDF generation is SDK-independent and does not yet place real source PDF page content onto destination sheets inside Acrobat
 - run-bundle now includes `sdk-ops.json` so native SDK transform placement can bind directly to deterministic operation records
 - cross-platform evidence tooling now includes validator + markdown checklist generator from smoke evidence JSON
+- plug-in run-bundle now auto-opens native imposed output when the experimental SDK composer succeeds
+- plug-in now includes panel-style quick actions (layout cycle, trim/bleed toggle, output temp target, state snapshot viewer) as stepping stone to a full persistent dialog UX
+- plug-in panel workflow now supports applying edited `panel-state.json` back into runtime preset (`Panel: Apply state`) for persistent UX iteration without rebuilding
+- panel quick-actions now cover quality gate toggling plus explicit A4/A3 sheet presets, moving menu-driven UX closer to a complete control surface
+- panel-state payload now carries editable layout/prepress controls (columns/rows/trim/bleed/quality) and apply-state consumes those fields for persistent round-trip editing
+- plug-in now exports a panel dialog package (state + schema JSON) to bootstrap a single-screen custom UI implementation path with explicit control definitions
+- native composer ingest now builds deterministic per-sheet sdk-op buckets (slot-sorted) as the execution backbone for one-sheet multi-placement XObject wiring
+- run-bundle now emits `xobject-compose.json` as an explicit per-sheet matrix/XObject execution contract artifact for host-side SDK composer implementation
 
 ### Product MVP gaps
 - no production control panel yet
@@ -89,6 +99,7 @@
 - planner-to-transform bridge is now available via manifest CTM export; still needs Acrobat SDK execution path
 - planner-to-transform bridge now emits adapter-based Acrobat placement scaffold plus an Acrobat-JS executable fallback (`runAimpPlacementWithAcrobatJs`) for host-side proof composition
 - plug-in now includes an experimental native SDK composer adapter (compile flag: `AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER`) that consumes `sdk-ops.json`, applies placement order + rotation (snapped to quarter-turns), and prefers planner-authored `targetRect` geometry for destination crop/media boxes with CTM fallback for first-pass transform parity
+- native composition path now validates parsed `sdk-ops.json` topology against planner sheet/slot output before attempting SDK placement, reducing silent mismatch risk in M2 integration
 - generate imposed output PDF from the active Acrobat document
 
 ### M3 — MVP usability
