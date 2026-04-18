@@ -140,6 +140,28 @@ int main() {
             manifest.find("\"c\": -300") == std::string::npos) {
             return Fail("Placement manifest should encode rotated CTM for 90-degree placement.");
         }
+
+        const auto js = aimp::ToAcrobatPlacementJs(aimp::TwoUpPlanner::Build("a\"b", 1, {600.0, 800.0}, options));
+        if (js.find("acrobat-sdk") == std::string::npos ||
+            js.find("ctm: [0, 600, -300, 0, 300, 100]") == std::string::npos ||
+            js.find("sourceDocId: \"a\\\"b\"") == std::string::npos) {
+            return Fail("Acrobat placement JS should include rotated CTM handoff instructions.");
+        }
+
+        aimp::PdfComposeOptions pdfOptions {};
+        pdfOptions.drawTrimMarks = true;
+        pdfOptions.drawBleedBox = true;
+        pdfOptions.bleedPoints = 6.0;
+        pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx4;
+        const auto productionJson = aimp::ToProductionCompositionJson(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            options,
+            pdfOptions);
+        if (productionJson.find("\"kind\": \"acrobat-production-composition\"") == std::string::npos ||
+            productionJson.find("\"pdfxProfile\": \"pdfx-4\"") == std::string::npos ||
+            productionJson.find("\"trimMarks\": true") == std::string::npos) {
+            return Fail("Production composition JSON should include prepress and profile settings.");
+        }
     }
 
     {
@@ -415,6 +437,26 @@ int main() {
     }
 
     {
+        const auto plan = aimp::TwoUpPlanner::Build("doc", 2, {595.0, 842.0});
+        aimp::PdfComposeOptions options {};
+        options.targetPdfxProfile = aimp::PdfxProfile::Pdfx4;
+        const auto issues = aimp::ValidatePrepressReadiness(plan, options);
+        bool foundTrim = false;
+        bool foundBleed = false;
+        for (const auto& issue : issues) {
+            if (issue.code == "pdfx.trim-required" && issue.isError) {
+                foundTrim = true;
+            }
+            if (issue.code == "pdfx.bleed-required" && issue.isError) {
+                foundBleed = true;
+            }
+        }
+        if (!foundTrim || !foundBleed) {
+            return Fail("ValidatePrepressReadiness should enforce PDF/X trim and bleed readiness.");
+        }
+    }
+
+    {
         aimp::PlannerPreset preset {};
         preset.sheetSize = {1000.0, 700.0};
         preset.columns = 2;
@@ -450,6 +492,7 @@ int main() {
         preset.pdfOptions.bleedPoints = 5.0;
         preset.pdfOptions.overlayTemplate = "job={{sheet}}/{{slot}}";
         preset.pdfOptions.variableDataCsvPath = "vars.csv";
+        preset.pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx1a2001;
 
         std::string error;
         const std::string presetPath = BuildTempPath("aimp_test_preset.txt");
@@ -514,6 +557,9 @@ int main() {
         if (loaded.pdfOptions.overlayTemplate != "job={{sheet}}/{{slot}}" ||
             loaded.pdfOptions.variableDataCsvPath != "vars.csv") {
             return Fail("Loaded preset overlay/csv options mismatch.");
+        }
+        if (loaded.pdfOptions.targetPdfxProfile != aimp::PdfxProfile::Pdfx1a2001) {
+            return Fail("Loaded preset PDF/X profile mismatch.");
         }
     }
 

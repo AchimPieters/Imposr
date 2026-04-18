@@ -1,0 +1,3 @@
+mode,pages,sheet_width,sheet_height,columns,rows,output_stem,pdfx_profile,trim_marks,bleed_box,bleed
+two-up,4,1000,700,,,batch-two,pdfx-4,1,1,6
+n-up,8,1000,700,2,2,batch-nup,pdfx-4,1,1,6

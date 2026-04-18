@@ -11,11 +11,94 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace {
+
+std::string EscapeJsonString(const std::string& input) {
+    std::string out;
+    out.reserve(input.size() + 8);
+    for (char ch : input) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '\"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+std::string BuildPreflightJson(const std::vector<aimp::PreflightIssue>& issues) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"status\": \"" << (issues.empty() ? "ok" : "issues") << "\",\n";
+    out << "  \"issues\": [\n";
+    for (std::size_t i = 0; i < issues.size(); ++i) {
+        const auto& issue = issues[i];
+        out << "    {\"severity\": \"" << (issue.isError ? "error" : "warning")
+            << "\", \"code\": \"" << EscapeJsonString(issue.code)
+            << "\", \"message\": \"" << EscapeJsonString(issue.message) << "\"}";
+        if (i + 1 < issues.size()) {
+            out << ',';
+        }
+        out << '\n';
+    }
+    out << "  ]\n";
+    out << "}\n";
+    return out.str();
+}
+
+std::string BuildJobReportJson(const std::string& mode,
+                               std::uint32_t pages,
+                               const std::string& outputPlanPath,
+                               const std::string& outputAuditPath,
+                               const std::string& outputManifestPath,
+                               const std::string& outputAcrobatJsPath,
+                               const std::string& outputCompositionPath,
+                               const std::string& outputPdfPath,
+                               const std::string& outputPreflightPath,
+                               const aimp::ImpositionPlan& plan,
+                               const aimp::PdfComposeOptions& pdfOptions,
+                               const std::vector<aimp::ValidationIssue>& validationIssues,
+                               const std::vector<aimp::PreflightIssue>& preflightIssues) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"job\": {\n";
+    out << "    \"mode\": \"" << EscapeJsonString(mode) << "\",\n";
+    out << "    \"inputPages\": " << pages << ",\n";
+    out << "    \"summary\": \"" << EscapeJsonString(aimp::BuildHumanSummary(plan)) << "\",\n";
+    out << "    \"pdfxProfile\": \"" << EscapeJsonString(aimp::PdfxProfileName(pdfOptions.targetPdfxProfile)) << "\"\n";
+    out << "  },\n";
+    out << "  \"outputs\": {\n";
+    out << "    \"planJson\": \"" << EscapeJsonString(outputPlanPath) << "\",\n";
+    out << "    \"auditXml\": \"" << EscapeJsonString(outputAuditPath) << "\",\n";
+    out << "    \"manifestJson\": \"" << EscapeJsonString(outputManifestPath) << "\",\n";
+    out << "    \"acrobatPlacementJs\": \"" << EscapeJsonString(outputAcrobatJsPath) << "\",\n";
+    out << "    \"productionCompositionJson\": \"" << EscapeJsonString(outputCompositionPath) << "\",\n";
+    out << "    \"proofPdf\": \"" << EscapeJsonString(outputPdfPath) << "\",\n";
+    out << "    \"preflightJson\": \"" << EscapeJsonString(outputPreflightPath) << "\"\n";
+    out << "  },\n";
+    out << "  \"qualityGate\": {\n";
+    out << "    \"validationIssueCount\": " << validationIssues.size() << ",\n";
+    out << "    \"preflightIssueCount\": " << preflightIssues.size() << ",\n";
+    std::size_t preflightErrorCount = 0;
+    for (const auto& issue : preflightIssues) {
+        if (issue.isError) {
+            ++preflightErrorCount;
+        }
+    }
+    out << "    \"preflightErrorCount\": " << preflightErrorCount << ",\n";
+    out << "    \"status\": \"" << ((validationIssues.empty() && preflightErrorCount == 0) ? "pass" : "fail") << "\"\n";
+    out << "  }\n";
+    out << "}\n";
+    return out.str();
+}
 
 void PrintUsage() {
     std::cout
@@ -26,7 +109,8 @@ void PrintUsage() {
         << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
         << "  imposr_cli tile --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--tile-overlap <pt>] [--out <file>]\n"
         << "  imposr_cli manual --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> --manual-sequence <csv>\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--pdf-out <file.pdf>] [--output-dir <dir>] [--output-stem <name>] [--stamp-output 0|1] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--pdf-overlay-template <text>] [--pdf-variable-csv <file.csv>] [--summary 0|1] [--validate 0|1] [--fail-on-validation 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "  imposr_cli batch --batch-csv <jobs.csv> --output-dir <dir> [--batch-report-out <file.json>] [--batch-stop-on-error 0|1]\n"
+        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--acrobat-js-out <file.js>] [--composition-out <file.json>] [--pdf-out <file.pdf>] [--job-out <file.json>] [--output-dir <dir>] [--output-stem <name>] [--stamp-output 0|1] [--batch-csv <jobs.csv>] [--batch-report-out <file.json>] [--batch-stop-on-error 0|1] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--pdf-overlay-template <text>] [--pdf-variable-csv <file.csv>] [--pdfx-profile none|pdfx-1a|pdfx-4] [--preflight 0|1] [--preflight-out <file.json>] [--fail-on-preflight 0|1] [--fail-on-quality-gate 0|1] [--summary 0|1] [--validate 0|1] [--fail-on-validation 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -92,6 +176,185 @@ std::string BuildDefaultOutputStem(const std::string& mode, std::uint32_t pages)
     return out.str();
 }
 
+std::vector<std::string> ParseCsvLine(const std::string& line) {
+    std::vector<std::string> fields;
+    std::string current;
+    bool inQuotes = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char ch = line[i];
+        if (ch == '"') {
+            if (inQuotes && i + 1 < line.size() && line[i + 1] == '"') {
+                current.push_back('"');
+                ++i;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+        if (ch == ',' && !inQuotes) {
+            fields.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(ch);
+    }
+    fields.push_back(current);
+    return fields;
+}
+
+std::string TrimAscii(std::string value) {
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t' || value.front() == '\r')) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+        value.pop_back();
+    }
+    return value;
+}
+
+std::string BuildBatchReportJson(std::uint32_t totalJobs,
+                                 std::uint32_t successJobs,
+                                 std::uint32_t failedJobs) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"type\": \"imposr-batch-report\",\n";
+    out << "  \"totalJobs\": " << totalJobs << ",\n";
+    out << "  \"successJobs\": " << successJobs << ",\n";
+    out << "  \"failedJobs\": " << failedJobs << ",\n";
+    out << "  \"status\": \"" << (failedJobs == 0 ? "ok" : "failed") << "\"\n";
+    out << "}\n";
+    return out.str();
+}
+
+int RunBatchMode(const std::string& cliPath,
+                 const std::string& csvPath,
+                 const std::string& outputDir,
+                 const std::string& batchReportOutPath,
+                 bool stopOnError,
+                 bool failOnQualityGate) {
+    if (csvPath.empty()) {
+        std::cerr << "batch mode requires --batch-csv\n";
+        return 1;
+    }
+    if (outputDir.empty()) {
+        std::cerr << "batch mode requires --output-dir\n";
+        return 1;
+    }
+
+    std::ifstream in(csvPath);
+    if (!in) {
+        std::cerr << "Could not open --batch-csv: " << csvPath << '\n';
+        return 1;
+    }
+
+    std::string headerLine;
+    if (!std::getline(in, headerLine)) {
+        std::cerr << "--batch-csv is empty\n";
+        return 1;
+    }
+    const auto headers = ParseCsvLine(headerLine);
+    std::map<std::string, std::size_t> columnIndex;
+    for (std::size_t i = 0; i < headers.size(); ++i) {
+        columnIndex[TrimAscii(headers[i])] = i;
+    }
+    if (columnIndex.find("mode") == columnIndex.end() ||
+        columnIndex.find("pages") == columnIndex.end() ||
+        columnIndex.find("sheet_width") == columnIndex.end() ||
+        columnIndex.find("sheet_height") == columnIndex.end()) {
+        std::cerr << "--batch-csv must include mode,pages,sheet_width,sheet_height columns\n";
+        return 1;
+    }
+
+    std::uint32_t totalJobs = 0;
+    std::uint32_t successJobs = 0;
+    std::uint32_t failedJobs = 0;
+    std::string executablePath = TrimAscii(cliPath);
+    if (executablePath.size() >= 2 && executablePath.front() == '"' && executablePath.back() == '"') {
+        executablePath = executablePath.substr(1, executablePath.size() - 2);
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        if (TrimAscii(line).empty()) {
+            continue;
+        }
+        const auto fields = ParseCsvLine(line);
+        const auto get = [&](const std::string& key, const std::string& fallback = "") -> std::string {
+            const auto it = columnIndex.find(key);
+            if (it == columnIndex.end() || it->second >= fields.size()) {
+                return fallback;
+            }
+            return TrimAscii(fields[it->second]);
+        };
+
+        const std::string mode = get("mode");
+        const std::string pages = get("pages");
+        const std::string sheetWidth = get("sheet_width");
+        const std::string sheetHeight = get("sheet_height");
+        const std::string columns = get("columns");
+        const std::string rows = get("rows");
+        const std::string outputStem = get("output_stem", mode + "_" + pages + "p");
+        const std::string pdfxProfile = get("pdfx_profile", "none");
+        const std::string trimMarks = get("trim_marks", "0");
+        const std::string bleedBox = get("bleed_box", "0");
+        const std::string bleed = get("bleed", "0");
+
+        std::ostringstream cmd;
+        cmd << '"' << executablePath << "\" " << mode
+            << " --pages " << pages
+            << " --sheet-width " << sheetWidth
+            << " --sheet-height " << sheetHeight
+            << " --output-dir " << outputDir
+            << " --output-stem " << outputStem
+            << " --pdfx-profile " << pdfxProfile
+            << " --pdf-trim-marks " << trimMarks
+            << " --pdf-bleed-box " << bleedBox
+            << " --pdf-bleed " << bleed
+            << " --preflight 1";
+
+        if (!columns.empty()) {
+            cmd << " --columns " << columns;
+        }
+        if (!rows.empty()) {
+            cmd << " --rows " << rows;
+        }
+        if (failOnQualityGate) {
+            cmd << " --fail-on-quality-gate 1";
+        }
+
+        ++totalJobs;
+        const int rc = std::system(cmd.str().c_str());
+        if (rc == 0) {
+            ++successJobs;
+        } else {
+            ++failedJobs;
+            std::cerr << "Batch job failed for output_stem=" << outputStem << " (exit=" << rc << ")\n";
+            if (stopOnError) {
+                break;
+            }
+        }
+    }
+
+    if (!batchReportOutPath.empty()) {
+        std::error_code ec;
+        const auto reportParent = std::filesystem::path(batchReportOutPath).parent_path();
+        if (!reportParent.empty()) {
+            std::filesystem::create_directories(reportParent, ec);
+            if (ec) {
+                std::cerr << "Could not create parent directory for --batch-report-out: " << reportParent.string() << '\n';
+                return 1;
+            }
+        }
+        std::ofstream out(batchReportOutPath);
+        if (!out) {
+            std::cerr << "Could not open --batch-report-out: " << batchReportOutPath << '\n';
+            return 1;
+        }
+        out << BuildBatchReportJson(totalJobs, successJobs, failedJobs);
+    }
+
+    return failedJobs == 0 ? 0 : 5;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -116,9 +379,15 @@ int main(int argc, char** argv) {
     std::string outPath;
     std::string auditOutPath;
     std::string manifestOutPath;
+    std::string acrobatJsOutPath;
+    std::string compositionOutPath;
+    std::string preflightOutPath;
+    std::string jobOutPath;
     std::string pdfOutPath;
     std::string outputDir;
     std::string outputStem;
+    std::string batchCsvPath;
+    std::string batchReportOutPath;
     bool stampOutput = false;
     aimp::PdfComposeOptions pdfOptions {};
     std::uint32_t inspectSourcePage = aimp::kBlankPageIndex;
@@ -130,6 +399,10 @@ int main(int argc, char** argv) {
     bool emitSummary = false;
     bool emitValidation = false;
     bool failOnValidation = false;
+    bool emitPreflight = false;
+    bool failOnPreflight = false;
+    bool failOnQualityGate = false;
+    bool batchStopOnError = false;
     std::string manualSequenceCsv;
     std::vector<std::uint32_t> manualSequence;
     std::string pageSequenceCsv;
@@ -205,6 +478,12 @@ int main(int argc, char** argv) {
             auditOutPath = value;
         } else if (key == "--manifest-out") {
             manifestOutPath = value;
+        } else if (key == "--acrobat-js-out") {
+            acrobatJsOutPath = value;
+        } else if (key == "--composition-out") {
+            compositionOutPath = value;
+        } else if (key == "--job-out") {
+            jobOutPath = value;
         } else if (key == "--load-preset") {
             // Already handled in first pass.
             continue;
@@ -216,6 +495,17 @@ int main(int argc, char** argv) {
             outputDir = value;
         } else if (key == "--output-stem") {
             outputStem = value;
+        } else if (key == "--batch-csv") {
+            batchCsvPath = value;
+        } else if (key == "--batch-report-out") {
+            batchReportOutPath = value;
+        } else if (key == "--batch-stop-on-error") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --batch-stop-on-error (expected 0 or 1)\n";
+                return 1;
+            }
+            batchStopOnError = (raw == 1);
         } else if (key == "--stamp-output") {
             std::uint32_t raw = 0;
             if (!ParseUInt(value, raw) || raw > 1) {
@@ -282,6 +572,34 @@ int main(int argc, char** argv) {
             pdfOptions.overlayTemplate = value;
         } else if (key == "--pdf-variable-csv") {
             pdfOptions.variableDataCsvPath = value;
+        } else if (key == "--pdfx-profile") {
+            if (!aimp::TryParsePdfxProfile(value, pdfOptions.targetPdfxProfile)) {
+                std::cerr << "Invalid value for --pdfx-profile (none|pdfx-1a|pdfx-4)\n";
+                return 1;
+            }
+        } else if (key == "--preflight") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --preflight (expected 0 or 1)\n";
+                return 1;
+            }
+            emitPreflight = (raw == 1);
+        } else if (key == "--preflight-out") {
+            preflightOutPath = value;
+        } else if (key == "--fail-on-preflight") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --fail-on-preflight (expected 0 or 1)\n";
+                return 1;
+            }
+            failOnPreflight = (raw == 1);
+        } else if (key == "--fail-on-quality-gate") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --fail-on-quality-gate (expected 0 or 1)\n";
+                return 1;
+            }
+            failOnQualityGate = (raw == 1);
         } else if (key == "--summary") {
             std::uint32_t raw = 0;
             if (!ParseUInt(value, raw) || raw > 1) {
@@ -420,6 +738,10 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (mode == "batch") {
+        return RunBatchMode(argv[0], batchCsvPath, outputDir, batchReportOutPath, batchStopOnError, failOnQualityGate);
+    }
+
     if (!pageSequenceCsv.empty()) {
         std::string parseError;
         if (!ParsePageSequenceCsv(pageSequenceCsv, pageSequence, parseError)) {
@@ -513,8 +835,20 @@ int main(int argc, char** argv) {
         if (manifestOutPath.empty()) {
             manifestOutPath = base.string() + ".manifest.json";
         }
+        if (acrobatJsOutPath.empty()) {
+            acrobatJsOutPath = base.string() + ".acrobat-placement.js";
+        }
+        if (compositionOutPath.empty()) {
+            compositionOutPath = base.string() + ".production-composition.json";
+        }
         if (pdfOutPath.empty()) {
             pdfOutPath = base.string() + ".proof.pdf";
+        }
+        if (preflightOutPath.empty()) {
+            preflightOutPath = base.string() + ".preflight.json";
+        }
+        if (jobOutPath.empty()) {
+            jobOutPath = base.string() + ".job.json";
         }
     }
 
@@ -546,6 +880,22 @@ int main(int argc, char** argv) {
             return 1;
         }
         file << aimp::ToPlacementManifestJson(plan);
+    }
+    if (!acrobatJsOutPath.empty()) {
+        std::ofstream file(acrobatJsOutPath);
+        if (!file) {
+            std::cerr << "Could not open Acrobat JS output file: " << acrobatJsOutPath << '\n';
+            return 1;
+        }
+        file << aimp::ToAcrobatPlacementJs(plan);
+    }
+    if (!compositionOutPath.empty()) {
+        std::ofstream file(compositionOutPath);
+        if (!file) {
+            std::cerr << "Could not open production composition output file: " << compositionOutPath << '\n';
+            return 1;
+        }
+        file << aimp::ToProductionCompositionJson(plan, buildOptions, pdfOptions);
     }
 
     if (!pdfOutPath.empty()) {
@@ -594,7 +944,7 @@ int main(int argc, char** argv) {
     }
 
     std::vector<aimp::ValidationIssue> validationIssues;
-    if (emitValidation || failOnValidation) {
+    if (emitValidation || failOnValidation || failOnQualityGate) {
         validationIssues = aimp::ValidatePlan(plan);
     }
 
@@ -607,6 +957,56 @@ int main(int argc, char** argv) {
                 std::cout << issue.code << ": " << issue.message << '\n';
             }
         }
+    }
+
+    std::vector<aimp::PreflightIssue> preflightIssues;
+    if (emitPreflight || failOnPreflight || failOnQualityGate || !preflightOutPath.empty()) {
+        preflightIssues = aimp::ValidatePrepressReadiness(plan, pdfOptions);
+    }
+
+    if (!preflightOutPath.empty()) {
+        std::ofstream file(preflightOutPath);
+        if (!file) {
+            std::cerr << "Could not open preflight output file: " << preflightOutPath << '\n';
+            return 1;
+        }
+        file << BuildPreflightJson(preflightIssues);
+    }
+
+    if (emitPreflight) {
+        std::cout << "\n# Preflight";
+        if (pdfOptions.targetPdfxProfile != aimp::PdfxProfile::None) {
+            std::cout << " (" << aimp::PdfxProfileName(pdfOptions.targetPdfxProfile) << ")";
+        }
+        std::cout << "\n";
+        if (preflightIssues.empty()) {
+            std::cout << "OK\n";
+        } else {
+            for (const auto& issue : preflightIssues) {
+                std::cout << (issue.isError ? "ERROR " : "WARN ") << issue.code << ": " << issue.message << '\n';
+            }
+        }
+    }
+
+    if (!jobOutPath.empty()) {
+        std::ofstream file(jobOutPath);
+        if (!file) {
+            std::cerr << "Could not open job report output file: " << jobOutPath << '\n';
+            return 1;
+        }
+        file << BuildJobReportJson(mode,
+                                   pages,
+                                   outPath,
+                                   auditOutPath,
+                                   manifestOutPath,
+                                   acrobatJsOutPath,
+                                   compositionOutPath,
+                                   pdfOutPath,
+                                   preflightOutPath,
+                                   plan,
+                                   pdfOptions,
+                                   validationIssues,
+                                   preflightIssues);
     }
 
     if (inspectSheet != aimp::kBlankPageIndex && inspectSlot != aimp::kBlankPageIndex) {
@@ -622,6 +1022,30 @@ int main(int argc, char** argv) {
     if (failOnValidation && !validationIssues.empty()) {
         std::cerr << "Validation failed with " << validationIssues.size() << " issue(s).\n";
         return 2;
+    }
+    if (failOnPreflight) {
+        std::size_t errorCount = 0;
+        for (const auto& issue : preflightIssues) {
+            if (issue.isError) {
+                ++errorCount;
+            }
+        }
+        if (errorCount > 0) {
+            std::cerr << "Preflight failed with " << errorCount << " error(s).\n";
+            return 3;
+        }
+    }
+    if (failOnQualityGate) {
+        std::size_t preflightErrorCount = 0;
+        for (const auto& issue : preflightIssues) {
+            if (issue.isError) {
+                ++preflightErrorCount;
+            }
+        }
+        if (!validationIssues.empty() || preflightErrorCount > 0) {
+            std::cerr << "Combined quality gate failed (validation/preflight).\n";
+            return 4;
+        }
     }
 
     return 0;
