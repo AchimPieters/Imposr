@@ -15,7 +15,9 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -253,7 +255,18 @@ int RunProcess(const std::vector<std::string>& args, std::string& renderedComman
     }
 
 #if defined(_WIN32)
-    return std::system(renderedCommand.c_str());
+    std::vector<const char*> argv;
+    argv.reserve(args.size() + 1);
+    for (const auto& arg : args) {
+        argv.push_back(arg.c_str());
+    }
+    argv.push_back(nullptr);
+
+    const int rc = _spawnv(_P_WAIT, args[0].c_str(), argv.data());
+    if (rc < 0) {
+        return 1;
+    }
+    return rc;
 #else
     std::vector<char*> argv;
     argv.reserve(args.size() + 1);
