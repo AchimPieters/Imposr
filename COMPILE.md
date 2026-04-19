@@ -24,13 +24,76 @@ Wat deze scripts doen:
 3. Daarna automatisch een packaging build uitvoeren.
 4. Tot slot installers/packages genereren met CPack.
 
-### Plugin build met script (optioneel)
+### 0.1 Snel starten (copy/paste)
 
-- **Windows:** `.\scripts\build_installer_windows.ps1 -WithPlugin -AcrobatSdkDir "C:\path\to\AcrobatSDK"`
-- **macOS:** `./scripts/build_installer_macos.sh --with-plugin --acrobat-sdk-dir "/path/to/AcrobatSDK"`
-- **Linux:** plugin-flow wordt in deze repo niet ondersteund; script bouwt daarom zonder plug-in.
+#### Windows (PowerShell)
+
+```powershell
+.\scripts\build_installer_windows.ps1
+```
+
+#### macOS (Terminal)
+
+```bash
+chmod +x ./scripts/build_installer_macos.sh
+./scripts/build_installer_macos.sh
+```
+
+#### Linux (Terminal)
+
+```bash
+chmod +x ./scripts/build_installer_linux.sh
+./scripts/build_installer_linux.sh
+```
+
+### 0.2 Optionele parameters per script
+
+#### Windows (`build_installer_windows.ps1`)
+
+```powershell
+.\scripts\build_installer_windows.ps1 `
+  -BuildDir build-package `
+  -BuildType Release `
+  -Generator "Visual Studio 17 2022" `
+  -Arch x64
+```
+
+Plugin build:
+
+```powershell
+.\scripts\build_installer_windows.ps1 -WithPlugin -AcrobatSdkDir "C:\path\to\AcrobatSDK"
+```
+
+#### macOS (`build_installer_macos.sh`)
+
+```bash
+./scripts/build_installer_macos.sh --build-dir build-package --jobs 8
+```
+
+Plugin build:
+
+```bash
+./scripts/build_installer_macos.sh --with-plugin --acrobat-sdk-dir "/path/to/AcrobatSDK"
+```
+
+#### Linux (`build_installer_linux.sh`)
+
+```bash
+./scripts/build_installer_linux.sh --build-dir build-package --jobs 8
+```
+
+> Linux plug-in flow wordt niet ondersteund in deze repository; `--with-plugin` wordt genegeerd met waarschuwing.
+
+### 0.3 Wat krijg je als output?
+
+Na een succesvolle run vind je artifacts in de gekozen buildmap (standaard `build-package/`), bijvoorbeeld:
+
+- `.zip` / `.exe` (Windows, afhankelijk van CPack generators)
+- `.dmg` / `.tar.gz` (macOS, afhankelijk van CPack generators)
+- `.tar.gz` / `.deb` (Linux, afhankelijk van beschikbare tooling)
 
 > Let op: installaties kunnen adminrechten vragen (bijv. `sudo` op Linux/macOS of elevated PowerShell op Windows).
+> Let op 2: sommige installers (bijv. NSIS op Windows of DEB op Linux) worden alleen gemaakt als de benodigde packaging tools beschikbaar zijn.
 
 ---
 
