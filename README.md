@@ -171,6 +171,17 @@ python3 tools/release_endproduct_gate.py --evidence docs/sdk_smoke_evidence.json
 
 Documentatie:
 - `docs/ENDPRODUCT_RELEASE_GATE.md`
+- `docs/ENDPRODUCT_RELEASE_RUNBOOK.md`
+
+Eén command voor endproduct release-prep (gate + packaging + checksums + rapport):
+
+```bash
+python3 tools/prepare_endproduct_release.py \
+  --evidence docs/sdk_smoke_evidence.json \
+  --build-dir build-package \
+  --build-type Release \
+  --jobs 8
+```
 
 ### CLI voorbeeld
 
