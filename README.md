@@ -163,6 +163,15 @@ python3 tools/score_sdk_readiness.py \
 CI production gate:
 - `.github/workflows/host-runtime-gate.yml` (draait op `main` en `workflow_dispatch`).
 
+Hard endproduct GO/NO-GO gate:
+
+```bash
+python3 tools/release_endproduct_gate.py --evidence docs/sdk_smoke_evidence.json
+```
+
+Documentatie:
+- `docs/ENDPRODUCT_RELEASE_GATE.md`
+
 ### CLI voorbeeld
 
 ```bash
