@@ -10,6 +10,30 @@ Ik ga uit van een beginner (“noob”), dus je krijgt:
 
 ---
 
+## 0) Alles automatisch laten doen (aanrader)
+
+Wil je zo min mogelijk handmatig doen? Gebruik dan de platformscripts:
+
+- **Windows (PowerShell):** `.\scripts\build_installer_windows.ps1`
+- **macOS (Terminal):** `./scripts/build_installer_macos.sh`
+- **Linux (Terminal):** `./scripts/build_installer_linux.sh`
+
+Wat deze scripts doen:
+1. Controleren of basissoftware/tools aanwezig zijn.
+2. Missende tools proberen te installeren (via de package manager van het platform).
+3. Daarna automatisch een packaging build uitvoeren.
+4. Tot slot installers/packages genereren met CPack.
+
+### Plugin build met script (optioneel)
+
+- **Windows:** `.\scripts\build_installer_windows.ps1 -WithPlugin -AcrobatSdkDir "C:\path\to\AcrobatSDK"`
+- **macOS:** `./scripts/build_installer_macos.sh --with-plugin --acrobat-sdk-dir "/path/to/AcrobatSDK"`
+- **Linux:** plugin-flow wordt in deze repo niet ondersteund; script bouwt daarom zonder plug-in.
+
+> Let op: installaties kunnen adminrechten vragen (bijv. `sudo` op Linux/macOS of elevated PowerShell op Windows).
+
+---
+
 ## 1) Eerst: wat moet je geïnstalleerd hebben?
 
 Installeer deze onderdelen eerst:
@@ -258,6 +282,8 @@ Relevante CI-workflows:
 - `.github/workflows/installers.yml`
 - `.github/workflows/release-readiness.yml`
 - `.github/workflows/host-runtime-gate.yml`
+
+> Je kunt deze stap ook in één keer doen met de scripts uit sectie **0**.
 
 ---
 
