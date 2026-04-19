@@ -14,6 +14,16 @@ option(AIMP_ENABLE_WARNINGS "Enable compiler warnings for all targets." ON)
 option(AIMP_WARNINGS_AS_ERRORS "Treat compiler warnings as errors." OFF)
 option(AIMP_ENABLE_SANITIZERS "Enable address/undefined sanitizers for supported compilers." OFF)
 option(AIMP_ENABLE_PACKAGING "Enable install/CPack packaging targets." ON)
+option(AIMP_DEPLOY_PLUGIN_TO_ACROBAT_ON_INSTALL "Deploy plugin into Acrobat plug-in directory during install/package install when possible." ON)
+
+if(WIN32)
+  set(AIMP_ACROBAT_PLUGIN_INSTALL_DIR_DEFAULT "C:/Program Files/Adobe/Acrobat DC/Acrobat/plug_ins")
+elseif(APPLE)
+  set(AIMP_ACROBAT_PLUGIN_INSTALL_DIR_DEFAULT "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins")
+else()
+  set(AIMP_ACROBAT_PLUGIN_INSTALL_DIR_DEFAULT "")
+endif()
+set(AIMP_ACROBAT_PLUGIN_INSTALL_DIR "${AIMP_ACROBAT_PLUGIN_INSTALL_DIR_DEFAULT}" CACHE PATH "Destination folder for Acrobat plug-in deployment.")
 
 if(NOT DEFINED ACROBAT_SDK_DIR)
   if(DEFINED ENV{ACROBAT_SDK_DIR})
@@ -191,6 +201,21 @@ if(AIMP_ENABLE_PACKAGING)
     find_program(AIMP_MAKENSIS_EXECUTABLE makensis)
     if(AIMP_MAKENSIS_EXECUTABLE)
       set(CPACK_GENERATOR "ZIP;NSIS")
+      set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+      set(CPACK_NSIS_MODIFY_PATH OFF)
+      if(AIMP_BUILD_PLUGIN AND AIMP_DEPLOY_PLUGIN_TO_ACROBAT_ON_INSTALL AND AIMP_ACROBAT_PLUGIN_INSTALL_DIR)
+        file(TO_NATIVE_PATH "${AIMP_ACROBAT_PLUGIN_INSTALL_DIR}" AIMP_ACROBAT_PLUGIN_INSTALL_DIR_NATIVE)
+        set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS
+          "CreateDirectory \\\"${AIMP_ACROBAT_PLUGIN_INSTALL_DIR_NATIVE}\\\"\\n"
+          "IfFileExists \\\"$INSTDIR\\\\${CMAKE_INSTALL_BINDIR}\\\\AcrobatImpositionPlugin.dll\\\" 0 +2\\n"
+          "CopyFiles /SILENT \\\"$INSTDIR\\\\${CMAKE_INSTALL_BINDIR}\\\\AcrobatImpositionPlugin.dll\\\" \\\"${AIMP_ACROBAT_PLUGIN_INSTALL_DIR_NATIVE}\\\\AcrobatImpositionPlugin.dll\\\"\\n"
+          "WriteINIStr \\\"$INSTDIR\\\\plugin-deploy.ini\\\" \\\"acrobat\\\" \\\"plugin_path\\\" \\\"${AIMP_ACROBAT_PLUGIN_INSTALL_DIR_NATIVE}\\\\AcrobatImpositionPlugin.dll\\\"\\n"
+        )
+        set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
+          "Delete \\\"${AIMP_ACROBAT_PLUGIN_INSTALL_DIR_NATIVE}\\\\AcrobatImpositionPlugin.dll\\\"\\n"
+          "Delete \\\"$INSTDIR\\\\plugin-deploy.ini\\\"\\n"
+        )
+      endif()
     else()
       set(CPACK_GENERATOR "ZIP")
     endif()
