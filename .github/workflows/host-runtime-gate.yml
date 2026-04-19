@@ -1,0 +1,30 @@
+name: Host Runtime Production Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+
+jobs:
+  host-runtime-evidence-gate:
+    name: Validate host-runtime smoke evidence
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate host-runtime matrix (production gate)
+        run: >
+          python3 tools/validate_sdk_smoke.py
+          --evidence docs/sdk_smoke_evidence.json
+          --require-host-runtime
+          --forbid-mock
+
+      - name: Enforce 100/100 readiness score
+        run: >
+          python3 tools/score_sdk_readiness.py
+          --evidence docs/sdk_smoke_evidence.json
+          --require-100
+          --forbid-mock

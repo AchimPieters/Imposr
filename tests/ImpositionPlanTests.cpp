@@ -817,6 +817,104 @@ int main() {
         }
     }
 
+    {
+        const std::string invalidFilterPresetPath = BuildTempPath("aimp_invalid_filter_preset.txt");
+        {
+            std::ofstream out(invalidFilterPresetPath);
+            out << "sheetWidth=1000\n";
+            out << "sheetHeight=700\n";
+            out << "columns=2\n";
+            out << "rows=1\n";
+            out << "tileOverlap=0\n";
+            out << "repeatX=0\n";
+            out << "repeatY=0\n";
+            out << "stepX=0\n";
+            out << "stepY=0\n";
+            out << "slotWidth=0\n";
+            out << "slotHeight=0\n";
+            out << "reverse=0\n";
+            out << "filter=invalid-filter\n";
+            out << "padMultiple=0\n";
+            out << "bookletSignatureSize=0\n";
+            out << "explicitPageSequence=\n";
+            out << "manualSequence=\n";
+            out << "scaleToFit=1\n";
+            out << "autoRotateToFit=1\n";
+            out << "sourcePageWidth=0\n";
+            out << "sourcePageHeight=0\n";
+            out << "bookletCreepPerSheet=0\n";
+            out << "pdfSheetNumber=1\n";
+            out << "pdfHeader=\n";
+            out << "pdfFooter=\n";
+            out << "pdfIncludeBates=0\n";
+            out << "pdfBatesPrefix=\n";
+            out << "pdfBatesStart=1\n";
+            out << "pdfxProfile=none\n";
+            out << "failOnValidationIssues=1\n";
+            out << "failOnPreflightErrors=1\n";
+            out << "outputDirectory=\n";
+            out << "outputStem=\n";
+        }
+
+        aimp::PlannerPreset preset {};
+        std::string error;
+        if (aimp::LoadPreset(invalidFilterPresetPath, preset, error)) {
+            return Fail("LoadPreset should fail when filter value is not a supported enum.");
+        }
+        if (error.find("filter") == std::string::npos) {
+            return Fail("LoadPreset filter failure should mention the filter key.");
+        }
+    }
+
+    {
+        const std::string invalidSheetPresetPath = BuildTempPath("aimp_invalid_sheet_preset.txt");
+        {
+            std::ofstream out(invalidSheetPresetPath);
+            out << "sheetWidth=nan\n";
+            out << "sheetHeight=-1\n";
+            out << "columns=2\n";
+            out << "rows=1\n";
+            out << "tileOverlap=0\n";
+            out << "repeatX=0\n";
+            out << "repeatY=0\n";
+            out << "stepX=0\n";
+            out << "stepY=0\n";
+            out << "slotWidth=0\n";
+            out << "slotHeight=0\n";
+            out << "reverse=0\n";
+            out << "filter=all\n";
+            out << "padMultiple=0\n";
+            out << "bookletSignatureSize=0\n";
+            out << "explicitPageSequence=\n";
+            out << "manualSequence=\n";
+            out << "scaleToFit=1\n";
+            out << "autoRotateToFit=1\n";
+            out << "sourcePageWidth=0\n";
+            out << "sourcePageHeight=0\n";
+            out << "bookletCreepPerSheet=0\n";
+            out << "pdfSheetNumber=1\n";
+            out << "pdfHeader=\n";
+            out << "pdfFooter=\n";
+            out << "pdfIncludeBates=0\n";
+            out << "pdfBatesPrefix=\n";
+            out << "pdfBatesStart=1\n";
+            out << "pdfxProfile=none\n";
+            out << "failOnValidationIssues=1\n";
+            out << "failOnPreflightErrors=1\n";
+            out << "outputDirectory=\n";
+            out << "outputStem=\n";
+        }
+
+        aimp::PlannerPreset preset {};
+        std::string error;
+        if (aimp::LoadPreset(invalidSheetPresetPath, preset, error)) {
+            return Fail("LoadPreset should fail on non-finite or non-positive sheet dimensions.");
+        }
+        if (error.find("sheetWidth") == std::string::npos && error.find("sheetHeight") == std::string::npos) {
+            return Fail("LoadPreset sheet dimension failures should mention sheet keys.");
+        }
+    }
+
     std::cout << "All planner checks passed.\n";
     return EXIT_SUCCESS;
 }
