@@ -3,6 +3,7 @@
 #include <charconv>
 #include <cstdlib>
 #include <fstream>
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -22,7 +23,10 @@ bool ParseUInt(const std::string& value, std::uint32_t& output) {
 bool ParseDouble(const std::string& value, double& output) {
     char* parseEnd = nullptr;
     output = std::strtod(value.c_str(), &parseEnd);
-    return parseEnd != value.c_str() && *parseEnd == '\0';
+    if (parseEnd == value.c_str() || *parseEnd != '\0') {
+        return false;
+    }
+    return std::isfinite(output);
 }
 
 bool ParseBool(const std::string& value, bool& output) {
@@ -46,14 +50,20 @@ std::string FilterToString(PageFilter filter) {
     }
 }
 
-PageFilter StringToFilter(const std::string& value) {
+bool TryParseFilter(const std::string& value, PageFilter& filter) {
+    if (value == "all") {
+        filter = PageFilter::All;
+        return true;
+    }
     if (value == "even") {
-        return PageFilter::EvenOnly;
+        filter = PageFilter::EvenOnly;
+        return true;
     }
     if (value == "odd") {
-        return PageFilter::OddOnly;
+        filter = PageFilter::OddOnly;
+        return true;
     }
-    return PageFilter::All;
+    return false;
 }
 
 std::string TrimAscii(const std::string& value) {
@@ -203,8 +213,8 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
         return false;
     };
 
-    if (!RequireKey(values, "sheetWidth", raw) || !ParseDouble(raw, preset.sheetSize.widthPoints)) return fail("sheetWidth");
-    if (!RequireKey(values, "sheetHeight", raw) || !ParseDouble(raw, preset.sheetSize.heightPoints)) return fail("sheetHeight");
+    if (!RequireKey(values, "sheetWidth", raw) || !ParseDouble(raw, preset.sheetSize.widthPoints) || preset.sheetSize.widthPoints <= 0.0) return fail("sheetWidth");
+    if (!RequireKey(values, "sheetHeight", raw) || !ParseDouble(raw, preset.sheetSize.heightPoints) || preset.sheetSize.heightPoints <= 0.0) return fail("sheetHeight");
     if (!RequireKey(values, "columns", raw) || !ParseUInt(raw, preset.columns)) return fail("columns");
     if (!RequireKey(values, "rows", raw) || !ParseUInt(raw, preset.rows)) return fail("rows");
     if (RequireKey(values, "tileOverlap", raw)) {
@@ -259,8 +269,7 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     } else {
         preset.buildOptions.bookletCreepPerSheetPoints = 0.0;
     }
-    if (!RequireKey(values, "filter", raw)) return fail("filter");
-    preset.buildOptions.filter = StringToFilter(raw);
+    if (!RequireKey(values, "filter", raw) || !TryParseFilter(raw, preset.buildOptions.filter)) return fail("filter");
     if (!RequireKey(values, "reverse", raw) || !ParseBool(raw, preset.buildOptions.reverseOrder)) return fail("reverse");
     if (!RequireKey(values, "pdfSheetNumber", raw) || !ParseBool(raw, preset.pdfOptions.includeSheetNumber)) return fail("pdfSheetNumber");
     if (!RequireKey(values, "pdfHeader", preset.pdfOptions.headerText)) return fail("pdfHeader");
@@ -328,6 +337,9 @@ bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& err
     if (RequireKey(values, "outputStem", preset.outputStem)) {
         // Optional.
     } else {
+        preset.outputStem = "acrobat-imposition-run";
+    }
+    if (preset.outputStem.empty()) {
         preset.outputStem = "acrobat-imposition-run";
     }
 
