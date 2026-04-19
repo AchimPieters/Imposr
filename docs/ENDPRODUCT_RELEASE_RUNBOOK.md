@@ -2,6 +2,9 @@
 
 Gebruik dit runbook om van development naar een echte endproduct release te gaan.
 
+Zie ook het concrete verbeterplan:
+- `docs/STAPPEN_NAAR_100_100.md`
+
 ## 1) Vul echte host-evidence in
 
 Werk `docs/sdk_smoke_evidence.json` bij met **echte** Windows/macOS host-runtime resultaten.

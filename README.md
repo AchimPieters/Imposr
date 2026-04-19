@@ -172,6 +172,7 @@ python3 tools/release_endproduct_gate.py --evidence docs/sdk_smoke_evidence.json
 Documentatie:
 - `docs/ENDPRODUCT_RELEASE_GATE.md`
 - `docs/ENDPRODUCT_RELEASE_RUNBOOK.md`
+- `docs/STAPPEN_NAAR_100_100.md`
 
 Eén command voor endproduct release-prep (gate + packaging + checksums + rapport):
 
