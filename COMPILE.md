@@ -55,7 +55,8 @@ chmod +x ./scripts/build_installer_linux.sh
   -BuildDir build-package `
   -BuildType Release `
   -Generator "Visual Studio 17 2022" `
-  -Arch x64
+  -Arch x64 `
+  -AcrobatPluginInstallDir "C:\Program Files\Adobe\Acrobat DC\Acrobat\plug_ins"
 ```
 
 Plugin build:
@@ -67,7 +68,8 @@ Plugin build:
 #### macOS (`build_installer_macos.sh`)
 
 ```bash
-./scripts/build_installer_macos.sh --build-dir build-package --jobs 8
+./scripts/build_installer_macos.sh --build-dir build-package --jobs 8 \
+  --acrobat-plugin-install-dir "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins"
 ```
 
 Plugin build:
@@ -94,6 +96,12 @@ Na een succesvolle run vind je artifacts in de gekozen buildmap (standaard `buil
 
 > Let op: installaties kunnen adminrechten vragen (bijv. `sudo` op Linux/macOS of elevated PowerShell op Windows).
 > Let op 2: sommige installers (bijv. NSIS op Windows of DEB op Linux) worden alleen gemaakt als de benodigde packaging tools beschikbaar zijn.
+
+### 0.4 Deinstaller + plugin auto-deploy
+
+- **Windows (met NSIS installer):** de installer bevat uninstall-flow. Bij plugin-build probeert de installer/script `AcrobatImpositionPlugin.dll` naar Acrobat `plug_ins` te kopiëren.
+- **macOS script-flow:** bij `--with-plugin` kopieert het script de plugin naar de Acrobat Plug-ins map en maakt het `build-package/uninstall-plugin.sh`.
+- **Windows script-flow:** bij `-WithPlugin` kopieert het script de plugin naar de Acrobat plug-in map en maakt het `build-package/uninstall-plugin.ps1`.
 
 ---
 

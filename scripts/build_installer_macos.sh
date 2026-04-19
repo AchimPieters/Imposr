@@ -5,6 +5,7 @@ BUILD_DIR="build-package"
 BUILD_TYPE="Release"
 WITH_PLUGIN="false"
 ACROBAT_SDK_DIR_VALUE="${ACROBAT_SDK_DIR:-}"
+ACROBAT_PLUGIN_INSTALL_DIR="/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins"
 JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
 
 usage() {
@@ -30,6 +31,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --build-dir)
       BUILD_DIR="${2:-build-package}"
+      shift 2
+      ;;
+    --acrobat-plugin-install-dir)
+      ACROBAT_PLUGIN_INSTALL_DIR="${2:-$ACROBAT_PLUGIN_INSTALL_DIR}"
       shift 2
       ;;
     --jobs)
@@ -122,6 +127,7 @@ fi
 echo "[2/4] Configureer packaging build"
 cmake -S . -B "$BUILD_DIR" \
   -DAIMP_BUILD_PLUGIN="$PLUGIN_FLAG" \
+  -DAIMP_ACROBAT_PLUGIN_INSTALL_DIR="$ACROBAT_PLUGIN_INSTALL_DIR" \
   -DAIMP_BUILD_CLI=ON \
   -DAIMP_BUILD_TESTS=OFF \
   -DAIMP_ENABLE_PACKAGING=ON \
@@ -132,5 +138,26 @@ cmake --build "$BUILD_DIR" -j"$JOBS"
 
 echo "[4/4] Genereer installers/packages"
 cpack --config "$BUILD_DIR/CPackConfig.cmake" -C "$BUILD_TYPE"
+
+if [[ "$WITH_PLUGIN" == "true" ]]; then
+  PLUGIN_SRC="$BUILD_DIR/libAcrobatImpositionPlugin.dylib"
+  PLUGIN_DST="$ACROBAT_PLUGIN_INSTALL_DIR/AcrobatImpositionPlugin.dylib"
+  if [[ -f "$PLUGIN_SRC" ]]; then
+    sudo mkdir -p "$ACROBAT_PLUGIN_INSTALL_DIR"
+    sudo cp -f "$PLUGIN_SRC" "$PLUGIN_DST"
+    echo "[OK] Plugin gedeployed naar: $PLUGIN_DST"
+    UNINSTALL_SCRIPT="$BUILD_DIR/uninstall-plugin.sh"
+    cat > "$UNINSTALL_SCRIPT" <<UNINSTALL
+#!/usr/bin/env bash
+set -euo pipefail
+sudo rm -f "$PLUGIN_DST"
+echo "Plugin verwijderd: $PLUGIN_DST"
+UNINSTALL
+    chmod +x "$UNINSTALL_SCRIPT"
+    echo "[OK] Deinstaller script gemaakt: $UNINSTALL_SCRIPT"
+  else
+    echo "[WARN] Plugin artifact niet gevonden op $PLUGIN_SRC; deploy overgeslagen."
+  fi
+fi
 
 echo "Klaar. Check artifacts in $BUILD_DIR/"

@@ -4,6 +4,7 @@ param(
     [string]$BuildType = "Release",
     [switch]$WithPlugin,
     [string]$AcrobatSdkDir,
+    [string]$AcrobatPluginInstallDir = "C:\Program Files\Adobe\Acrobat DC\Acrobat\plug_ins",
     [string]$Generator = "Visual Studio 17 2022",
     [string]$Arch = "x64"
 )
@@ -70,6 +71,11 @@ if ($WithPlugin) {
         $env:ACROBAT_SDK_DIR = $AcrobatSdkDir
     }
 
+    if (-not (Test-Path $AcrobatPluginInstallDir)) {
+        Write-Host "[INFO] Acrobat plug-in map ontbreekt; maak aan: $AcrobatPluginInstallDir"
+        New-Item -ItemType Directory -Force -Path $AcrobatPluginInstallDir | Out-Null
+    }
+
     $pluginFlag = "ON"
 }
 else {
@@ -79,6 +85,7 @@ else {
 Write-Host "[2/4] Configureer packaging build"
 cmake -S . -B $BuildDir -G $Generator -A $Arch `
     -DAIMP_BUILD_PLUGIN=$pluginFlag `
+    -DAIMP_ACROBAT_PLUGIN_INSTALL_DIR="$AcrobatPluginInstallDir" `
     -DAIMP_BUILD_CLI=ON `
     -DAIMP_BUILD_TESTS=OFF `
     -DAIMP_ENABLE_PACKAGING=ON
@@ -88,5 +95,29 @@ cmake --build $BuildDir --config $BuildType
 
 Write-Host "[4/4] Genereer installers/packages"
 cpack --config "$BuildDir/CPackConfig.cmake" -C $BuildType
+
+if ($WithPlugin) {
+    $pluginFrom = Join-Path (Resolve-Path $BuildDir) "$BuildType\\AcrobatImpositionPlugin.dll"
+    $pluginTo = Join-Path $AcrobatPluginInstallDir "AcrobatImpositionPlugin.dll"
+    if (Test-Path $pluginFrom) {
+        Copy-Item -Force $pluginFrom $pluginTo
+        Write-Host "[OK] Plugin gedeployed naar: $pluginTo"
+        $uninstallScript = @"
+`$pluginPath = \"$pluginTo\"
+if (Test-Path `$pluginPath) {
+    Remove-Item -Force `$pluginPath
+    Write-Host \"Plugin verwijderd: `$pluginPath\"
+} else {
+    Write-Host \"Plugin niet gevonden: `$pluginPath\"
+}
+"@
+        $uninstallPath = Join-Path (Resolve-Path $BuildDir) "uninstall-plugin.ps1"
+        Set-Content -Path $uninstallPath -Value $uninstallScript -Encoding UTF8
+        Write-Host "[OK] Deinstaller script gemaakt: $uninstallPath"
+    }
+    else {
+        Write-Warning "Plugin artifact niet gevonden op $pluginFrom; deploy overgeslagen."
+    }
+}
 
 Write-Host "Klaar. Check artifacts in $BuildDir/"
