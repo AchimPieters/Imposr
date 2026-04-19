@@ -48,6 +48,7 @@ python3 tools/release_endproduct_gate.py \
 
 > Gebruik `--allow-mock` nooit voor echte releases.
 > Gebruik `--skip-commercial-docs-check` alleen tijdelijk tijdens setup; niet voor echte releases.
+> Gebruik `--allow-incomplete-commercial-docs` alleen tijdens opstart; commerciële release vereist volledig afgevinkte checklists/policies.
 
 ## Aanbevolen release-volgorde
 

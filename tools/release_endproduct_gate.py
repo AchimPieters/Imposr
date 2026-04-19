@@ -100,6 +100,10 @@ def _find_row(rows: list[dict], os_name: str, cpu: str) -> dict | None:
     return None
 
 
+def _has_unchecked_checkbox(text: str) -> bool:
+    return "- [ ]" in text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", default="docs/sdk_smoke_evidence.json")
@@ -118,6 +122,11 @@ def main() -> int:
         "--skip-commercial-docs-check",
         action="store_true",
         help="Skip required commercial governance docs check (not recommended for real releases).",
+    )
+    parser.add_argument(
+        "--allow-incomplete-commercial-docs",
+        action="store_true",
+        help="Allow commercial docs/checklists with open TODO checkboxes (development only).",
     )
     args = parser.parse_args()
 
@@ -169,6 +178,14 @@ def main() -> int:
                 continue
             if doc_path.stat().st_size == 0:
                 issues.append(f"commercial-docs: empty file {doc_path}")
+                continue
+            if not args.allow_incomplete_commercial_docs:
+                text = doc_path.read_text(encoding="utf-8")
+                if _has_unchecked_checkbox(text):
+                    issues.append(
+                        f"commercial-docs: unresolved checklist items in {doc_path} "
+                        "(use --allow-incomplete-commercial-docs only for development)"
+                    )
 
     if issues:
         print("ENDPRODUCT RELEASE GATE: FAIL")

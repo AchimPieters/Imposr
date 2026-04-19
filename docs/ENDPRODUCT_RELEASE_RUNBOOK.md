@@ -48,7 +48,8 @@ Publiceer pas wanneer:
 ```bash
 python3 tools/prepare_endproduct_release.py \
   --allow-mock \
-  --allow-simulated-runtime
+  --allow-simulated-runtime \
+  --allow-incomplete-commercial-docs
 ```
 
 > Nooit gebruiken voor echte productrelease.

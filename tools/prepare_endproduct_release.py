@@ -84,6 +84,7 @@ def main() -> int:
     parser.add_argument("--jobs", default="4")
     parser.add_argument("--allow-mock", action="store_true")
     parser.add_argument("--allow-simulated-runtime", action="store_true")
+    parser.add_argument("--allow-incomplete-commercial-docs", action="store_true")
     parser.add_argument("--report-out", default="docs/ENDPRODUCT_RELEASE_PREP_REPORT.md")
     args = parser.parse_args()
 
@@ -100,6 +101,8 @@ def main() -> int:
         gate_cmd.append("--allow-mock")
     if args.allow_simulated_runtime:
         gate_cmd.append("--allow-simulated-runtime")
+    if args.allow_incomplete_commercial_docs:
+        gate_cmd.append("--allow-incomplete-commercial-docs")
 
     steps: list[StepResult] = []
     steps.append(run_step("Hard endproduct gate", gate_cmd, repo_root))
