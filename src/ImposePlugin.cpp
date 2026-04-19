@@ -354,17 +354,31 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
         return out;
     };
     std::ostringstream out;
-    out << "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Acrobat Imposition Dialog</title>";
-    out << "<style>body{font-family:Arial,sans-serif;margin:24px;}h1{font-size:20px;}code{background:#f4f4f4;padding:2px 4px;}"
-        << ".card{border:1px solid #ddd;padding:12px;margin:10px 0;}label{display:block;font-weight:bold;margin-top:8px;}"
-        << "input,select{width:100%;max-width:420px;padding:6px;margin-top:2px;}button{margin-top:12px;padding:8px 12px;}</style>";
+    out << "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Create booklet - aligning pages</title>";
+    out << "<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#f3f3f3;}h1{font-size:20px;margin:0 0 10px;}"
+        << "code{background:#f4f4f4;padding:2px 4px;} .wizard{background:#fff;border:1px solid #a9a9a9;max-width:860px;padding:16px;}"
+        << ".step{display:none;} .step.active{display:block;} .card{border:1px solid #ddd;padding:12px;margin:10px 0;background:#fff;}"
+        << ".option{display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid #ddd;margin:8px 0;background:#fafafa;}"
+        << ".preview-wrap{display:flex;gap:14px;justify-content:center;margin-top:16px;}"
+        << ".sheet{width:140px;height:190px;border:1px solid #777;background:#fefefe;display:flex;align-items:center;justify-content:center;}"
+        << ".half{width:90px;height:130px;border:1px solid #555;background:#ddd;display:flex;align-items:center;justify-content:center;font-size:64px;font-weight:700;}"
+        << "label{display:block;font-weight:bold;margin-top:8px;} input,select{width:100%;max-width:420px;padding:6px;margin-top:2px;}"
+        << ".wizard-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;} button{padding:8px 12px;}</style>";
     out << "</head><body>";
-    out << "<h1>Acrobat Imposition Unified Dialog Package</h1>";
+    out << "<div class='wizard'><h1>Create booklet - aligning pages</h1>";
     out << "<div class='card'><p>State JSON: <code>" << statePath << "</code></p>";
-    out << "<p>Schema JSON: <code>" << schemaPath << "</code></p>";
-    out << "<p>Gebruik dit scherm om state te bewerken en exporteer daarna JSON. "
-        << "Run vervolgens <b>Panel: Apply state</b> in Acrobat.</p></div>";
-    out << "<div class='card'><h2>Controls</h2>"
+    out << "<p>Schema JSON: <code>" << schemaPath << "</code></p></div>";
+    out << "<div id='step-1' class='step active'>";
+    out << "<p>When pages don't fit exactly, choose how pages are aligned in each half of the sheet.</p>";
+    out << "<label class='option'><input type='radio' name='alignMode' value='center_page' checked/>"
+        << "<span><b>1.</b> Centre each page in its half (recommended).</span></label>";
+    out << "<label class='option'><input type='radio' name='alignMode' value='center_column'/>"
+        << "<span><b>2.</b> Centre pages from top to bottom and pull towards sheet centre.</span></label>";
+    out << "<label class='option'><input type='radio' name='alignMode' value='bottom_left'/>"
+        << "<span><b>3.</b> Push each page to bottom-left of its half.</span></label>";
+    out << "<div class='preview-wrap'><div class='sheet'><div class='half'>L</div></div><div class='sheet'><div class='half'>R</div></div></div>";
+    out << "</div>";
+    out << "<div id='step-2' class='step'><div class='card'><h2>Advanced controls</h2>"
         << "<label>Mode<select id='mode'><option>two-up</option><option>n-up</option></select></label>"
         << "<label>Columns<input id='columns' type='number' min='1'/></label>"
         << "<label>Rows<input id='rows' type='number' min='1'/></label>"
@@ -386,10 +400,26 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
         << "<label><input id='failOnValidationIssues' type='checkbox'/> Fail on validation issues</label>"
         << "<label><input id='failOnPreflightErrors' type='checkbox'/> Fail on preflight errors</label>"
         << "<button onclick='exportState()'>Export edited panel-state JSON</button>"
-        << "<pre id='output'></pre></div>";
+        << "<pre id='output'></pre></div></div>";
+    out << "<div class='wizard-footer'>"
+        << "<button id='btnBack' onclick='prevStep()'>Back</button>"
+        << "<button id='btnNext' onclick='nextStep()'>Next</button>"
+        << "<button id='btnFinish' onclick='exportState()'>Finish</button>"
+        << "<button onclick='cancelWizard()'>Cancel</button></div></div>";
     out << "<script>\n";
     out << "const panelState = JSON.parse('" << escapeJs(stateJson) << "');\n";
     out << "const panelSchema = JSON.parse('" << escapeJs(schemaJson) << "');\n";
+    out << "let wizardStep = 1;\n";
+    out << "function showStep(){\n";
+    out << "document.getElementById('step-1').classList.toggle('active', wizardStep === 1);\n";
+    out << "document.getElementById('step-2').classList.toggle('active', wizardStep === 2);\n";
+    out << "document.getElementById('btnBack').disabled = wizardStep === 1;\n";
+    out << "document.getElementById('btnNext').style.display = wizardStep === 2 ? 'none' : 'inline-block';\n";
+    out << "document.getElementById('btnFinish').style.display = wizardStep === 2 ? 'inline-block' : 'none';\n";
+    out << "}\n";
+    out << "function nextStep(){wizardStep = Math.min(2, wizardStep + 1); showStep();}\n";
+    out << "function prevStep(){wizardStep = Math.max(1, wizardStep - 1); showStep();}\n";
+    out << "function cancelWizard(){document.getElementById('output').textContent='Wizard cancelled.';}\n";
     out << "function setValues(){\n";
     out << "document.getElementById('mode').value = panelState.mode || 'two-up';\n";
     out << "document.getElementById('columns').value = panelState.preset.columns || 2;\n";
@@ -411,8 +441,14 @@ std::string BuildPanelDialogHtml(const std::string& statePath,
     out << "document.getElementById('drawBleedBox').checked = !!panelState.preset.drawBleedBox;\n";
     out << "document.getElementById('failOnValidationIssues').checked = !!panelState.preset.failOnValidationIssues;\n";
     out << "document.getElementById('failOnPreflightErrors').checked = !!panelState.preset.failOnPreflightErrors;\n";
+    out << "const alignMode = (panelState.preset.alignmentMode || 'center_page');\n";
+    out << "const alignInput = document.querySelector(`input[name=\\\"alignMode\\\"][value=\\\"${alignMode}\\\"]`);\n";
+    out << "if (alignInput) alignInput.checked = true;\n";
+    out << "showStep();\n";
     out << "}\n";
     out << "function exportState(){\n";
+    out << "const checkedAlign = document.querySelector('input[name=\\\"alignMode\\\"]:checked');\n";
+    out << "panelState.preset.alignmentMode = checkedAlign ? checkedAlign.value : 'center_page';\n";
     out << "panelState.mode = document.getElementById('mode').value;\n";
     out << "panelState.preset.columns = parseInt(document.getElementById('columns').value || '2', 10);\n";
     out << "panelState.preset.rows = parseInt(document.getElementById('rows').value || '1', 10);\n";

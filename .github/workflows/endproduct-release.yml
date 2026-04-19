@@ -1,0 +1,51 @@
+name: Endproduct Release Prep
+
+on:
+  workflow_dispatch:
+    inputs:
+      allow_mock:
+        description: "Allow mock evidence (development only)"
+        required: true
+        default: "false"
+      allow_simulated_runtime:
+        description: "Allow simulated runtime evidence"
+        required: true
+        default: "false"
+
+jobs:
+  endproduct-release-prep:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare endproduct release
+        run: |
+          ARGS=()
+          if [ "${{ github.event.inputs.allow_mock }}" = "true" ]; then
+            ARGS+=(--allow-mock)
+          fi
+          if [ "${{ github.event.inputs.allow_simulated_runtime }}" = "true" ]; then
+            ARGS+=(--allow-simulated-runtime)
+          fi
+          python3 tools/prepare_endproduct_release.py \
+            --evidence docs/sdk_smoke_evidence.json \
+            --build-dir build-package \
+            --build-type Release \
+            --jobs 4 \
+            "${ARGS[@]}"
+
+      - name: Upload release prep report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endproduct-release-prep-report
+          path: docs/ENDPRODUCT_RELEASE_PREP_REPORT.md
+
+      - name: Upload build-package artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endproduct-release-packages
+          path: build-package/
