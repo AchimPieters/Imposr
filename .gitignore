@@ -47,3 +47,21 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 CTestTestfile.cmake
+
+# Node / TypeScript
+node_modules/
+package-lock.json
+yarn.lock
+coverage/
+.nyc_output/
+
+# Electron / Webpack
+out/
+.webpack/
+release/
+dist/
+
+# Env
+.env
+.env.local
+.env.*.local

@@ -28,3 +28,8 @@ jobs:
           --evidence docs/sdk_smoke_evidence.json
           --require-100
           --forbid-mock
+
+      - name: Endproduct GO/NO-GO gate
+        run: >
+          python3 tools/release_endproduct_gate.py
+          --evidence docs/sdk_smoke_evidence.json
