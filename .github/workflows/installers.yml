@@ -1,0 +1,55 @@
+name: Build Installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  package:
+    name: Package on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-package
+          -DAIMP_BUILD_PLUGIN=OFF
+          -DAIMP_BUILD_CLI=ON
+          -DAIMP_BUILD_TESTS=OFF
+          -DAIMP_ENABLE_PACKAGING=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-package --config Release -j
+
+      - name: Create package artifacts
+        working-directory: build-package
+        run: cpack -C Release
+
+      - name: Generate package checksums
+        run: >
+          python3 tools/generate_package_checksums.py
+          --dir build-package
+          --out build-package/SHA256SUMS.txt
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            build-package/*.zip
+            build-package/*.exe
+            build-package/*.dmg
+            build-package/*.tar.gz
+            build-package/*.deb
+            build-package/SHA256SUMS.txt

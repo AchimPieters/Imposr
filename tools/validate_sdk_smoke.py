@@ -52,9 +52,42 @@ def _is_valid_execution_mode(value: str) -> bool:
     return normalized in {"host-runtime", "simulated-runtime"}
 
 
+def _is_missing_metadata(value: str) -> bool:
+    normalized = _normalize(value)
+    return normalized in {"", "tbd", "vul-hier-versie-in", "vul-hier-sdk-in", "fill-me", "placeholder"}
+
+
+def _row_looks_mock(row: dict) -> bool:
+    notes = _normalize(str(row.get("notes", "")))
+    if "mock" in notes:
+        return True
+    for key in (
+        "bundle_path",
+        "proof_pdf_path",
+        "imposed_output_path",
+        "preflight_json_path",
+        "sdk_ops_path",
+        "control_surface_path",
+    ):
+        value = _normalize(str(row.get(key, "")))
+        if "mock" in value:
+            return True
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", required=True, help="Path to smoke evidence JSON.")
+    parser.add_argument(
+        "--require-host-runtime",
+        action="store_true",
+        help="Fail validation unless every matrix row has execution_mode=host-runtime.",
+    )
+    parser.add_argument(
+        "--forbid-mock",
+        action="store_true",
+        help="Fail validation when row notes/paths indicate mock evidence.",
+    )
     args = parser.parse_args()
 
     evidence_path = Path(args.evidence)
@@ -89,7 +122,7 @@ def main() -> int:
 
         for metadata_key in REQUIRED_METADATA:
             metadata_value = str(row.get(metadata_key, "")).strip()
-            if metadata_value == "" or metadata_value.lower() == "tbd":
+            if _is_missing_metadata(metadata_value):
                 failed.append(f"{os_name} / {cpu}: missing metadata field {metadata_key}")
         execution_mode = str(row.get("execution_mode", ""))
         if not _is_valid_execution_mode(execution_mode):
@@ -97,6 +130,13 @@ def main() -> int:
                 f"{os_name} / {cpu}: execution_mode={execution_mode!r} "
                 "(expected host-runtime or simulated-runtime)"
             )
+        elif args.require_host_runtime and _normalize(execution_mode) != "host-runtime":
+            failed.append(
+                f"{os_name} / {cpu}: execution_mode={execution_mode!r} "
+                "(host-runtime required for production gate)"
+            )
+        if args.forbid_mock and _row_looks_mock(row):
+            failed.append(f"{os_name} / {cpu}: mock evidence is not allowed for production gate")
 
         for artifact_key in (
             "bundle_path",

@@ -1,0 +1,61 @@
+name: Release Readiness Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  strict-core-gate:
+    name: Strict core build/test + simulated SDK smoke gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Configure (strict)
+        run: >
+          cmake -S . -B build-strict
+          -DAIMP_BUILD_PLUGIN=OFF
+          -DAIMP_BUILD_TESTS=ON
+          -DAIMP_BUILD_CLI=ON
+          -DCMAKE_BUILD_TYPE=Debug
+          -DAIMP_ENABLE_WARNINGS=ON
+          -DAIMP_WARNINGS_AS_ERRORS=ON
+          -DAIMP_ENABLE_SANITIZERS=ON
+
+      - name: Build (strict)
+        run: cmake --build build-strict -j
+
+      - name: Test (strict)
+        run: ctest --test-dir build-strict --output-on-failure
+
+      - name: Generate simulated SDK smoke evidence
+        run: >
+          python3 tools/generate_simulated_sdk_smoke_evidence.py
+          --out docs/sdk_smoke_evidence.simulated.json
+          --artifact-root /tmp/aimp-simulated-smoke
+
+      - name: Validate SDK smoke gate
+        run: python3 tools/validate_sdk_smoke.py --evidence docs/sdk_smoke_evidence.simulated.json
+
+      - name: Generate release checklist and matrix report
+        run: |
+          python3 tools/generate_release_checklist.py --evidence docs/sdk_smoke_evidence.simulated.json --out docs/RELEASE_CHECKLIST.simulated.md
+          python3 tools/generate_sdk_matrix_report.py --evidence docs/sdk_smoke_evidence.simulated.json --out docs/SDK_SMOKE_MATRIX_REPORT.simulated.md
+
+      - name: Upload readiness artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-readiness-simulated
+          path: |
+            docs/sdk_smoke_evidence.simulated.json
+            docs/RELEASE_CHECKLIST.simulated.md
+            docs/SDK_SMOKE_MATRIX_REPORT.simulated.md
