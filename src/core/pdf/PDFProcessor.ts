@@ -14,6 +14,8 @@ export interface PDFValidationOptions {
   maxPages?: number;
   maxFileSizeBytes?: number;
   requireEncrypted?: boolean;
+  pdfxProfile?: 'none' | 'pdfx-1a' | 'pdfx-4';
+  requireConsistentPageSizes?: boolean;
 }
 
 /** Result returned by validation. */
@@ -21,6 +23,8 @@ export interface PDFValidationResult {
   valid: boolean;
   pageCount: number;
   fileSizeBytes: number;
+  encrypted: boolean;
+  pageSizes: Array<{ width: number; height: number }>;
   errors: string[];
 }
 
@@ -61,8 +65,11 @@ export class PDFProcessor {
     try {
       const stats = await fs.stat(filePath);
       const fileSizeBytes = stats.size;
-      const doc = await this.load(filePath);
+      const bytes = await fs.readFile(filePath);
+      const encrypted = await this.isEncrypted(bytes);
+      const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
       const pageCount = doc.getPageCount();
+      const pageSizes = doc.getPages().map((page) => page.getSize());
       const errors: string[] = [];
 
       if (options.minPages !== undefined && pageCount < options.minPages) {
@@ -77,13 +84,32 @@ export class PDFProcessor {
         );
       }
       if (options.requireEncrypted === true) {
-        errors.push('Encrypted PDF requirement is not implemented in current engine');
+        if (!encrypted) {
+          errors.push('PDF must be encrypted');
+        }
+      } else if (encrypted) {
+        errors.push('Encrypted PDFs are not supported for processing');
+      }
+      if (options.requireConsistentPageSizes === true && !this.hasConsistentPageSizes(pageSizes)) {
+        errors.push('PDF pages must all have identical dimensions');
+      }
+
+      const profile = options.pdfxProfile ?? 'none';
+      if (profile !== 'none') {
+        if (encrypted) {
+          errors.push(`PDF/X profile ${profile} does not allow encrypted input`);
+        }
+        if (profile === 'pdfx-1a' && !this.hasConsistentPageSizes(pageSizes)) {
+          errors.push('PDF/X-1a preflight requires consistent page dimensions');
+        }
       }
 
       return {
         valid: errors.length === 0,
         pageCount,
         fileSizeBytes,
+        encrypted,
+        pageSizes,
         errors,
       };
     } catch (error) {
@@ -121,5 +147,28 @@ export class PDFProcessor {
       });
       throw new PDFProcessingError(message, { inputFiles, outputFile });
     }
+  }
+
+  private async isEncrypted(bytes: Uint8Array): Promise<boolean> {
+    try {
+      await PDFDocument.load(bytes);
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      if (message.includes('encrypted')) {
+        return true;
+      }
+      throw error;
+    }
+  }
+
+  private hasConsistentPageSizes(pageSizes: Array<{ width: number; height: number }>): boolean {
+    if (pageSizes.length <= 1) {
+      return true;
+    }
+    const first = pageSizes[0];
+    return pageSizes.every(
+      (size) => Math.abs(size.width - first.width) < 0.01 && Math.abs(size.height - first.height) < 0.01
+    );
   }
 }

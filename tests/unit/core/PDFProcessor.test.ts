@@ -8,10 +8,14 @@ import { PDFLoadError, PDFProcessingError } from '../../../src/utils/errors';
 describe('PDFProcessor', () => {
   const processor = new PDFProcessor();
 
-  async function createPdf(filePath: string, pages = 1): Promise<void> {
+  async function createPdf(
+    filePath: string,
+    pages = 1,
+    sizes: Array<[number, number]> = []
+  ): Promise<void> {
     const doc = await PDFDocument.create();
     for (let i = 0; i < pages; i += 1) {
-      doc.addPage([300, 400]);
+      doc.addPage(sizes[i] ?? [300, 400]);
     }
     const bytes = await doc.save();
     await fs.writeFile(filePath, bytes);
@@ -28,6 +32,8 @@ describe('PDFProcessor', () => {
     const result = await processor.validate(file, { minPages: 1, maxPages: 10 });
     expect(result.valid).toBe(true);
     expect(result.pageCount).toBe(2);
+    expect(result.encrypted).toBe(false);
+    expect(result.pageSizes).toHaveLength(2);
   });
 
   it('merges files', async () => {
@@ -66,6 +72,7 @@ describe('PDFProcessor', () => {
     });
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThanOrEqual(3);
+    expect(result.errors).toContain('PDF must be encrypted');
   });
 
   it('fails merge when no input files are provided', async () => {
@@ -83,5 +90,30 @@ describe('PDFProcessor', () => {
 
   it('fails validate when file does not exist', async () => {
     await expect(processor.validate('/tmp/not-here.pdf')).rejects.toBeTruthy();
+  });
+
+  it('fails PDF/X-1a preflight when page sizes differ', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'imposr-pdf-'));
+    const file = path.join(dir, 'mixed.pdf');
+    await createPdf(file, 2, [
+      [300, 400],
+      [320, 400],
+    ]);
+
+    const result = await processor.validate(file, { pdfxProfile: 'pdfx-1a' });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('PDF/X-1a preflight requires consistent page dimensions');
+  });
+
+  it('accepts PDF/X-4 preflight with mixed page sizes', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'imposr-pdf-'));
+    const file = path.join(dir, 'mixed-x4.pdf');
+    await createPdf(file, 2, [
+      [300, 400],
+      [320, 400],
+    ]);
+
+    const result = await processor.validate(file, { pdfxProfile: 'pdfx-4' });
+    expect(result.valid).toBe(true);
   });
 });

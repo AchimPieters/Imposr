@@ -21,4 +21,8 @@ describe('PageArranger', () => {
     expect(() => arranger.arrange(0, 2, 'sequential')).toThrow();
     expect(() => arranger.arrange(2, 0, 'sequential')).toThrow();
   });
+
+  it('throws for unsupported mode', () => {
+    expect(() => arranger.arrange(8, 2, 'invalid' as never)).toThrow();
+  });
 });
