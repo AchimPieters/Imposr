@@ -26,6 +26,7 @@ Een release is alleen **GO** als:
    - `sdk_ops_path`
    - `control_surface_path`
 6. Er geen mock-evidence aanwezig is.
+7. Verplichte commerciële governance-documenten aanwezig zijn (licentie/compliance/support/security/customer-ops).
 
 ## Eén commando voor GO/NO-GO
 
@@ -46,6 +47,7 @@ python3 tools/release_endproduct_gate.py \
 ```
 
 > Gebruik `--allow-mock` nooit voor echte releases.
+> Gebruik `--skip-commercial-docs-check` alleen tijdelijk tijdens setup; niet voor echte releases.
 
 ## Aanbevolen release-volgorde
 

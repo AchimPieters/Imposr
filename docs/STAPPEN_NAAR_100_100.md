@@ -57,6 +57,7 @@ Van de huidige MVP-status naar **100/100 release-ready** met echte host-runtime 
 **Bewijs**
 - `python3 tools/prepare_endproduct_release.py --evidence docs/sdk_smoke_evidence.json --build-dir build-package --build-type Release --jobs 8`
 - `python3 tools/release_endproduct_gate.py --evidence docs/sdk_smoke_evidence.json`
+- `docs/COMMERCIAL_RELEASE_CHECKLIST.md` volledig afgevinkt + onderliggende policy-docs ingevuld.
 
 ## Stap 6 — Hard gate 100/100 afdwingen
 

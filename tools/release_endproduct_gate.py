@@ -40,6 +40,22 @@ REQUIRED_ARTIFACTS = (
     "control_surface_path",
 )
 
+REQUIRED_COMMERCIAL_DOCS = (
+    "docs/COMMERCIAL_RELEASE_CHECKLIST.md",
+    "docs/commercial/THIRD_PARTY_NOTICES.md",
+    "docs/commercial/EULA.md",
+    "docs/commercial/PRIVACY_STATEMENT.md",
+    "docs/commercial/TELEMETRY_DISCLOSURE.md",
+    "docs/release/VERSIONING_POLICY.md",
+    "docs/release/ROLLBACK_POLICY.md",
+    "docs/release/UPGRADE_COMPATIBILITY_MATRIX.md",
+    "docs/support/INCIDENT_SLA.md",
+    "docs/security/SECURITY_RELEASE_CHECKLIST.md",
+    "docs/security/SBOM_POLICY.md",
+    "docs/customer-ops/ENTERPRISE_DEPLOYMENT.md",
+    "docs/customer-ops/TROUBLESHOOTING_PLAYBOOK.md",
+)
+
 
 def _normalize(value: str) -> str:
     return value.strip().lower()
@@ -98,6 +114,11 @@ def main() -> int:
         default=".",
         help="Base directory for resolving artifact paths inside the evidence file.",
     )
+    parser.add_argument(
+        "--skip-commercial-docs-check",
+        action="store_true",
+        help="Skip required commercial governance docs check (not recommended for real releases).",
+    )
     args = parser.parse_args()
 
     rows = _load_rows(Path(args.evidence))
@@ -139,6 +160,15 @@ def main() -> int:
             artifact_path = (artifact_root / value).resolve() if not Path(value).is_absolute() else Path(value)
             if not artifact_path.exists():
                 issues.append(f"{os_name}/{cpu}: artifact missing on disk: {artifact_path}")
+
+    if not args.skip_commercial_docs_check:
+        for doc in REQUIRED_COMMERCIAL_DOCS:
+            doc_path = (artifact_root / doc).resolve()
+            if not doc_path.exists():
+                issues.append(f"commercial-docs: missing required file {doc_path}")
+                continue
+            if doc_path.stat().st_size == 0:
+                issues.append(f"commercial-docs: empty file {doc_path}")
 
     if issues:
         print("ENDPRODUCT RELEASE GATE: FAIL")

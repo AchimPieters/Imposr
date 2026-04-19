@@ -173,6 +173,7 @@ Documentatie:
 - `docs/ENDPRODUCT_RELEASE_GATE.md`
 - `docs/ENDPRODUCT_RELEASE_RUNBOOK.md`
 - `docs/STAPPEN_NAAR_100_100.md`
+- `docs/COMMERCIAL_RELEASE_CHECKLIST.md`
 
 Eén command voor endproduct release-prep (gate + packaging + checksums + rapport):
 
