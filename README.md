@@ -26,6 +26,8 @@ Zie voor detailstatus:
 - `docs/ROADMAP.md`
 - `docs/IMPLEMENTATIE_AUDIT_2026-04-17.md`
 - `docs/COMPATIBILITY_MATRIX_2026-04-18.md`
+- `docs/COMMERCIAL_DOD_MATRIX.md`
+- `docs/GAP_CLOSURE_PLAN.md`
 
 ## Snel starten (zonder Acrobat SDK)
 

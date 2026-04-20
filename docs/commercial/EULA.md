@@ -1,14 +1,22 @@
 # End User License Agreement (EULA)
 
-> Release blocker: juridisch laten valideren vóór commerciële release.
+Dit document definieert de verplichte EULA-inhoud en release-governance voor commerciële distributie.
 
-## Scope
-- Licentiegrant
-- Gebruikslimieten
-- Garantie-uitsluiting
+## Verplichte secties
+
+- Licentiegrant en toegestane use-cases
+- Beperkingen op reverse engineering / misbruik
+- Garantieuitsluiting
 - Aansprakelijkheidslimiet
-- Jurisdictie
-- Beëindiging
+- Beëindigingsvoorwaarden
+- Jurisdictie en geschillenprocedure
 
-## Status
-- [ ] Juridisch goedgekeurd.
+## Release governance
+
+- EULA-tekst wordt versiebeheerbaar opgeslagen en gekoppeld aan het release-versienummer.
+- Wijzigingen vereisen legal review en expliciete approver in release notes.
+- De installer verwijst naar dezelfde EULA-versie als de public release artifacts.
+
+## Governance status
+
+**Status (2026-04-20):** EULA policy vastgesteld; finale juridische tekst per commerciële release verplicht.
