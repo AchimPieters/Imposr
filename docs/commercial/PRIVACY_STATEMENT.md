@@ -1,14 +1,22 @@
 # Privacy Statement
 
-> Release blocker: verplicht indien persoonsgegevens of telemetry verwerkt worden.
+Beleid voor privacyverklaring van commerciële Imposr-releases.
 
-## Must define
-- Welke data wordt verzameld
-- Doel en rechtsgrond
-- Bewaartermijnen
-- Delen met derden
-- Rechten van betrokkenen
-- Contactpunt
+## Vereiste inhoud
 
-## Status
-- [ ] Juridisch/compliance goedgekeurd.
+- Datacategorieën (account, licensing, telemetry, crashdiagnostiek)
+- Doeleinden en rechtsgrond
+- Bewaartermijnen per datacategorie
+- Doorgifte aan derden (subprocessors)
+- Rechten van betrokkenen en verzoekproces
+- Contactpunt en escalation route
+
+## Release governance
+
+- Privacy statement versie wordt gekoppeld aan releaseversie.
+- Elke nieuwe datacategorie vereist voorafgaande privacy-impact review.
+- Statement moet publiek beschikbaar zijn op release-datum.
+
+## Governance status
+
+**Status (2026-04-20):** privacy policy framework vastgesteld; compliance sign-off verplicht voor GA.

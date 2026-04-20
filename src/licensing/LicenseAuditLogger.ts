@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { LicenseError } from '@utils/errors';
+import { withFileLock } from './FileLock';
+import { createFileCodec, FileCodec } from './EncryptedFileCodec';
 
 /** Supported audit event names for commercial licensing flows. */
 export type LicenseAuditEventType =
@@ -43,13 +45,31 @@ export class NoopLicenseAuditLogger implements LicenseAuditLogger {
  * File-backed append-only NDJSON audit logger.
  */
 export class FileLicenseAuditLogger implements LicenseAuditLogger {
-  constructor(private readonly filePath: string) {}
+  private readonly lockPath: string;
+  private readonly codec: FileCodec;
+
+  constructor(filePath: string, options: { encryptionSecret?: string } = {}) {
+    this.filePath = filePath;
+    this.lockPath = `${filePath}.lock`;
+    this.codec = createFileCodec(options.encryptionSecret);
+  }
+
+  private readonly filePath: string;
 
   async log(record: LicenseAuditRecord): Promise<void> {
     try {
       const dir = path.dirname(this.filePath);
       await fs.mkdir(dir, { recursive: true });
-      await fs.appendFile(this.filePath, `${JSON.stringify(record)}\n`, 'utf8');
+      await withFileLock(this.lockPath, async () => {
+        if (this.codec.enabled) {
+          const records = await this.readAll();
+          records.push(record);
+          await this.writeAll(records);
+          return;
+        }
+
+        await fs.appendFile(this.filePath, `${JSON.stringify(record)}\n`, 'utf8');
+      });
     } catch (error) {
       throw new LicenseError('Unable to write license audit log', {
         filePath: this.filePath,
@@ -64,13 +84,10 @@ export class FileLicenseAuditLogger implements LicenseAuditLogger {
     }
 
     try {
-      const content = await fs.readFile(this.filePath, 'utf8');
-      const lines = content
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-      const parsed = lines.map((line) => JSON.parse(line) as LicenseAuditRecord);
-      return parsed.slice(-limit).reverse();
+      return withFileLock(this.lockPath, async () => {
+        const parsed = await this.readAll();
+        return parsed.slice(-limit).reverse();
+      });
     } catch (error) {
       const nodeError = error as NodeJS.ErrnoException;
       if (nodeError?.code === 'ENOENT') {
@@ -82,5 +99,63 @@ export class FileLicenseAuditLogger implements LicenseAuditLogger {
         cause: error instanceof Error ? error.message : 'unknown',
       });
     }
+  }
+
+  private parseNdjson(content: string): LicenseAuditRecord[] {
+    return content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as LicenseAuditRecord);
+  }
+
+  private async readAll(): Promise<LicenseAuditRecord[]> {
+    let content: string;
+    try {
+      content = await fs.readFile(this.filePath, 'utf8');
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError?.code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+
+    let decoded = content;
+    let migrated = false;
+    if (this.codec.enabled) {
+      try {
+        decoded = this.codec.decode(content);
+      } catch {
+        // Backward compatibility: encryption enabled while existing file is plaintext.
+        migrated = true;
+      }
+    }
+
+    const trimmed = decoded.trim();
+    if (trimmed.length === 0) {
+      return [];
+    }
+
+    if (trimmed.startsWith('[')) {
+      const parsed = JSON.parse(trimmed) as LicenseAuditRecord[];
+      await this.writeAll(parsed);
+      return parsed;
+    }
+
+    const records = this.parseNdjson(decoded);
+    if (migrated) {
+      await this.writeAll(records);
+    }
+    return records;
+  }
+
+  private async writeAll(records: LicenseAuditRecord[]): Promise<void> {
+    const serialized = records.map((record) => JSON.stringify(record)).join('\n');
+    const payload = serialized.length > 0 ? `${serialized}\n` : '';
+    const encoded = this.codec.enabled ? this.codec.encode(payload) : payload;
+    const tempPath = `${this.filePath}.tmp`;
+    await fs.writeFile(tempPath, encoded, 'utf8');
+    await fs.rename(tempPath, this.filePath);
   }
 }

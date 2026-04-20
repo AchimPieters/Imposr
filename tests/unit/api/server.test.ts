@@ -169,7 +169,7 @@ describe('api/server', () => {
       const event = {
         id: 'evt_api_1',
         type: 'license.issued',
-        createdAt: '2026-04-19T00:00:00.000Z',
+        createdAt: new Date().toISOString(),
         data: {
           licenseKey: validLicenseKey,
         },
@@ -230,6 +230,28 @@ describe('api/server', () => {
       const payload = (await response.json()) as { ok: boolean; events: unknown[] };
       expect(payload.ok).toBe(true);
       expect(Array.isArray(payload.events)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it('rejects invalid paid issuance payload', async () => {
+    const app = createApiApp();
+    const server = app.listen(0);
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/webhooks/paid`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'invalid-email', tier: 'pro', validDays: 10 }),
+      });
+
+      expect(response.status).toBe(400);
+      const payload = (await response.json()) as { ok: boolean; code: string };
+      expect(payload.ok).toBe(false);
+      expect(payload.code).toBe('VALIDATION_ERROR');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

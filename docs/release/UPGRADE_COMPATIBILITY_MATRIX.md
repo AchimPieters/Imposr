@@ -1,10 +1,17 @@
 # Upgrade Compatibility Matrix
 
-## Required dimensions
+## Matrix-dimensies
+
 - Van versie -> naar versie
 - OS/architectuur
 - Acrobat versie
-- Datamigratie/preset compatibiliteit
+- Datamigratie- en preset-compatibiliteit
 
-## Status
-- [ ] Matrix ingevuld en getest.
+## Operationele eis
+
+- Elke GA release bevat geüpdatete matrix met minimaal N-2 upgradepaden.
+- Niet-ondersteunde upgradepaden worden expliciet gedocumenteerd.
+
+## Governance status
+
+**Status (2026-04-20):** matrix policy vastgesteld; release blocked bij ontbrekende matrix-update.

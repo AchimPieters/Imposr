@@ -1,0 +1,160 @@
+openapi: 3.0.3
+info:
+  title: Imposr Pro API
+  version: 1.0.0
+  description: Commercial API for PDF imposition, licensing, and billing/webhook operations.
+servers:
+  - url: http://localhost:4000
+paths:
+  /health:
+    get:
+      summary: API health check
+      responses:
+        '200':
+          description: Service healthy
+  /api/license/verify:
+    get:
+      summary: Validate a license key from `x-license-key` header
+      parameters:
+        - in: header
+          name: x-license-key
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: License valid
+        '422':
+          description: License invalid or expired
+  /api/license/offline/validate:
+    post:
+      summary: Validate offline activation token
+      parameters:
+        - in: header
+          name: x-license-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfflineValidationBody'
+      responses:
+        '200':
+          description: Offline token valid
+        '422':
+          description: Offline token invalid
+  /api/license/audit:
+    get:
+      summary: Read recent license audit events
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        '200':
+          description: Audit events returned
+  /api/webhooks/licensing:
+    post:
+      summary: Receive payment/licensing webhook event
+      parameters:
+        - in: header
+          name: x-webhook-signature
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LicensingWebhookBody'
+      responses:
+        '202':
+          description: Webhook accepted
+        '400':
+          description: Invalid payload
+  /api/webhooks/trial:
+    post:
+      summary: Issue trial license
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrialIssueBody'
+      responses:
+        '201':
+          description: Trial license created
+  /api/webhooks/paid:
+    post:
+      summary: Issue paid license
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaidIssueBody'
+      responses:
+        '201':
+          description: Paid license created
+components:
+  schemas:
+    OfflineValidationBody:
+      type: object
+      required: [offlineToken, machineFingerprint]
+      properties:
+        offlineToken:
+          type: string
+        machineFingerprint:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    TrialIssueBody:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        validDays:
+          type: integer
+          minimum: 1
+          maximum: 90
+    PaidIssueBody:
+      type: object
+      required: [email, tier, validDays]
+      properties:
+        email:
+          type: string
+          format: email
+        tier:
+          type: string
+          enum: [starter, pro, enterprise]
+        validDays:
+          type: integer
+          minimum: 30
+          maximum: 3650
+    LicensingWebhookBody:
+      type: object
+      required: [id, type, createdAt, data]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [license.issued, license.renewed, license.revoked, subscription.canceled]
+        createdAt:
+          type: string
+          format: date-time
+        data:
+          type: object
+          required: [licenseKey]
+          properties:
+            licenseKey:
+              type: string

@@ -1,8 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { LicenseError, NetworkError } from '@utils/errors';
 import { ActivationService } from './ActivationService';
 import { LicenseManager, LicensePayload, LicenseTier } from './LicenseManager';
 import { LicenseAuditLogger, NoopLicenseAuditLogger } from './LicenseAuditLogger';
+import { InMemoryWebhookReplayStore, WebhookReplayStore } from './WebhookReplayStore';
+import { GenericHmacAdapter, PaymentProviderAdapter } from './providers/PaymentProviderAdapter';
 
 /** Supported webhook event names for licensing/billing sync. */
 export type PaymentWebhookEventType =
@@ -27,6 +28,11 @@ export interface PaymentHandlerOptions {
   licenseManager: LicenseManager;
   activationService: ActivationService;
   auditLogger?: LicenseAuditLogger;
+  replayStore?: WebhookReplayStore;
+  now?: () => Date;
+  maxEventAgeMs?: number;
+  signatureToleranceMs?: number;
+  providerAdapter?: PaymentProviderAdapter;
 }
 
 /**
@@ -37,6 +43,11 @@ export class PaymentHandler {
   private readonly licenseManager: LicenseManager;
   private readonly activationService: ActivationService;
   private readonly auditLogger: LicenseAuditLogger;
+  private readonly replayStore: WebhookReplayStore;
+  private readonly now: () => Date;
+  private readonly maxEventAgeMs: number;
+  private readonly signatureToleranceMs: number;
+  private readonly providerAdapter: PaymentProviderAdapter;
 
   /**
    * @param options Dependencies and webhook signing secret.
@@ -50,6 +61,11 @@ export class PaymentHandler {
     this.licenseManager = options.licenseManager;
     this.activationService = options.activationService;
     this.auditLogger = options.auditLogger ?? new NoopLicenseAuditLogger();
+    this.replayStore = options.replayStore ?? new InMemoryWebhookReplayStore();
+    this.now = options.now ?? (() => new Date());
+    this.maxEventAgeMs = options.maxEventAgeMs ?? 10 * 60 * 1000;
+    this.signatureToleranceMs = options.signatureToleranceMs ?? 5 * 60 * 1000;
+    this.providerAdapter = options.providerAdapter ?? new GenericHmacAdapter();
   }
 
   /**
@@ -66,7 +82,7 @@ export class PaymentHandler {
       throw new LicenseError('Trial duration must be an integer between 1 and 90 days');
     }
 
-    const now = new Date();
+    const now = this.now();
     const expiresAt = new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000);
 
     const payload: LicensePayload = {
@@ -96,26 +112,13 @@ export class PaymentHandler {
    * @param signature Hex signature from provider header.
    */
   verifyWebhook(rawBody: string, signature: string): PaymentWebhookEvent {
-    if (!signature || !/^[a-f0-9]{64}$/i.test(signature)) {
-      throw new NetworkError('Webhook signature format is invalid');
-    }
-
-    const expectedSignature = createHmac('sha256', this.webhookSecret).update(rawBody, 'utf8').digest('hex');
-    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
-    const receivedBuffer = Buffer.from(signature, 'hex');
-
-    if (!timingSafeEqual(expectedBuffer, receivedBuffer)) {
-      throw new NetworkError('Webhook signature mismatch');
-    }
-
-    let event: PaymentWebhookEvent;
-    try {
-      event = JSON.parse(rawBody) as PaymentWebhookEvent;
-    } catch (error) {
-      throw new NetworkError('Webhook payload is not valid JSON', {
-        cause: error instanceof Error ? error.message : 'unknown',
-      });
-    }
+    const event = this.providerAdapter.verifyAndParse(
+      rawBody,
+      signature,
+      this.webhookSecret,
+      this.now,
+      this.signatureToleranceMs
+    );
 
     this.validateEvent(event);
     return event;
@@ -128,16 +131,20 @@ export class PaymentHandler {
   async processWebhookEvent(event: PaymentWebhookEvent): Promise<void> {
     this.validateEvent(event);
 
+    if (await this.replayStore.has(event.id)) {
+      throw new NetworkError('Webhook replay detected', { eventId: event.id });
+    }
+
     if (event.type === 'license.revoked' || event.type === 'subscription.canceled') {
       await this.activationService.deactivate(event.data.licenseKey);
     } else {
-      // issued/renewed must at least be valid licenses; activation remains user-driven.
       this.licenseManager.assertValid(event.data.licenseKey);
     }
 
+    await this.replayStore.mark(event.id);
     await this.auditLogger.log({
       eventType: 'payment.webhook',
-      timestamp: new Date().toISOString(),
+      timestamp: this.now().toISOString(),
       success: true,
       details: { eventId: event.id, type: event.type },
     });
@@ -161,7 +168,7 @@ export class PaymentHandler {
       enterprise: ['imposition', 'templates', 'batch', 'api'],
     };
 
-    const now = new Date();
+    const now = this.now();
     const expiresAt = new Date(now.getTime() + validDays * 24 * 60 * 60 * 1000);
 
     const key = this.licenseManager.sign({
@@ -203,6 +210,11 @@ export class PaymentHandler {
     const createdAt = new Date(event.createdAt);
     if (Number.isNaN(createdAt.getTime())) {
       throw new NetworkError('Webhook event createdAt is invalid');
+    }
+
+    const ageMs = this.now().getTime() - createdAt.getTime();
+    if (ageMs > this.maxEventAgeMs) {
+      throw new NetworkError('Webhook event is too old', { ageMs, maxEventAgeMs: this.maxEventAgeMs });
     }
   }
 }

@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { LicenseController } from '../controllers/LicenseController';
-import { requireBodyKeys } from '../middleware/validation';
 import { getLicensingRuntime } from '@licensing/LicensingFactory';
+import { validateBodySchema } from '../middleware/validation';
+import { offlineValidationBodySchema } from '../middleware/schemas';
 
 const router = Router();
 
@@ -29,7 +30,7 @@ router.post('/deactivate', (req, res, next) => {
   void controller.deactivate(req, res, next);
 });
 
-router.post('/offline/validate', requireBodyKeys(['offlineToken', 'machineFingerprint']), (req, res, next) => {
+router.post('/offline/validate', validateBodySchema(offlineValidationBodySchema), (req, res, next) => {
   void controller.validateOffline(req, res, next);
 });
 

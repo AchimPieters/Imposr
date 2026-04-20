@@ -27,6 +27,22 @@ describe('LicenseManager', () => {
     expect(result.payload).toMatchObject(payload);
   });
 
+  it('verifies legacy two-part keys when rotating secrets', () => {
+    const legacy = new LicenseManager({ signingSecret: 'legacy-secret-value-123' });
+    const key = legacy.sign(payload).split('.').slice(1).join('.');
+
+    const rotated = new LicenseManager({
+      signingSecret: 'new-secret-value-123456',
+      signingSecrets: {
+        legacy: 'legacy-secret-value-123',
+      },
+      defaultKeyId: 'v2',
+    });
+
+    const result = rotated.verify(key);
+    expect(result.status).toBe('valid');
+  });
+
   it('returns missing for empty key', () => {
     const manager = new LicenseManager({ signingSecret: 'super-secret-value-12345' });
     expect(manager.verify('')).toMatchObject({ status: 'missing', payload: null });

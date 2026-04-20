@@ -27,17 +27,21 @@ export interface LicenseInfo {
 
 /** Dependencies for cryptographic verification and date handling. */
 export interface LicenseManagerOptions {
-  signingSecret: string;
+  signingSecret?: string;
+  signingSecrets?: Record<string, string>;
+  defaultKeyId?: string;
   now?: () => Date;
 }
 
 /**
  * Manages parsing and verification of signed commercial license keys.
  *
- * Format: base64url(JSON payload).hex(HMAC-SHA256(payload))
+ * Format: keyId.base64url(JSON payload).hex(HMAC-SHA256(payload))
+ * Legacy format (still accepted): base64url(JSON payload).hex(HMAC-SHA256(payload))
  */
 export class LicenseManager {
-  private readonly signingSecret: string;
+  private readonly keySecrets: Map<string, string>;
+  private readonly defaultKeyId: string;
   private readonly now: () => Date;
 
   /**
@@ -45,11 +49,19 @@ export class LicenseManager {
    * @throws LicenseError If required options are missing.
    */
   constructor(options: LicenseManagerOptions) {
-    if (!options.signingSecret || options.signingSecret.trim().length < 16) {
-      throw new LicenseError('Signing secret must be provided and at least 16 characters long');
+    const keySecrets = this.buildKeySecrets(options);
+    if (keySecrets.size === 0) {
+      throw new LicenseError('At least one signing secret must be configured');
     }
 
-    this.signingSecret = options.signingSecret;
+    this.defaultKeyId = options.defaultKeyId ?? Array.from(keySecrets.keys())[0] ?? 'v1';
+    if (!keySecrets.has(this.defaultKeyId)) {
+      throw new LicenseError('defaultKeyId must exist in signingSecrets', {
+        defaultKeyId: this.defaultKeyId,
+      });
+    }
+
+    this.keySecrets = keySecrets;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -64,10 +76,10 @@ export class LicenseManager {
     }
 
     try {
-      const [payloadSegment, signatureSegment] = this.splitLicenseKey(licenseKey);
-      this.assertValidSignature(payloadSegment, signatureSegment);
+      const parsed = this.parseLicenseKey(licenseKey);
+      this.assertValidSignature(parsed.payloadSegment, parsed.signatureSegment, parsed.keyId);
 
-      const payload = this.parsePayload(payloadSegment);
+      const payload = this.parsePayload(parsed.payloadSegment);
       this.validatePayload(payload);
 
       const expiresAt = new Date(payload.expiresAt);
@@ -95,9 +107,9 @@ export class LicenseManager {
     this.validatePayload(payload);
 
     const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-    const signature = this.computeSignature(encodedPayload);
+    const signature = this.computeSignature(encodedPayload, this.defaultKeyId);
 
-    return `${encodedPayload}.${signature}`;
+    return `${this.defaultKeyId}.${encodedPayload}.${signature}`;
   }
 
   /**
@@ -113,31 +125,66 @@ export class LicenseManager {
     return result.payload;
   }
 
-  private splitLicenseKey(licenseKey: string): [string, string] {
+  private parseLicenseKey(licenseKey: string): {
+    keyId: string | null;
+    payloadSegment: string;
+    signatureSegment: string;
+  } {
     const parts = licenseKey.split('.');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      throw new LicenseError('License key format is invalid');
+
+    if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+      return {
+        keyId: parts[0],
+        payloadSegment: parts[1],
+        signatureSegment: parts[2],
+      };
     }
 
-    return [parts[0], parts[1]];
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return {
+        keyId: null,
+        payloadSegment: parts[0],
+        signatureSegment: parts[1],
+      };
+    }
+
+    throw new LicenseError('License key format is invalid');
   }
 
-  private assertValidSignature(encodedPayload: string, receivedSignature: string): void {
+  private assertValidSignature(
+    encodedPayload: string,
+    receivedSignature: string,
+    keyId: string | null
+  ): void {
     if (!/^[a-f0-9]{64}$/i.test(receivedSignature)) {
       throw new LicenseError('License signature format is invalid');
     }
 
-    const expectedSignature = this.computeSignature(encodedPayload);
-    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    const expectedSignatures = keyId
+      ? [this.computeSignature(encodedPayload, keyId)]
+      : Array.from(this.keySecrets.keys()).map((currentKeyId) =>
+          this.computeSignature(encodedPayload, currentKeyId)
+        );
+
     const receivedBuffer = Buffer.from(receivedSignature, 'hex');
 
-    if (!timingSafeEqual(expectedBuffer, receivedBuffer)) {
+    const matched = expectedSignatures.some((expectedSignature) => {
+      const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+      return timingSafeEqual(expectedBuffer, receivedBuffer);
+    });
+
+    if (!matched) {
       throw new LicenseError('License signature is invalid');
     }
   }
 
-  private computeSignature(encodedPayload: string): string {
-    return createHmac('sha256', this.signingSecret).update(encodedPayload, 'utf8').digest('hex');
+  private computeSignature(encodedPayload: string, keyId: string): string {
+    const secret = this.keySecrets.get(keyId);
+    if (!secret) {
+      throw new LicenseError('Unknown signing key id', { keyId });
+    }
+
+    return createHmac('sha256', secret).update(encodedPayload, 'utf8').digest('hex');
   }
 
   private parsePayload(encodedPayload: string): LicensePayload {
@@ -182,5 +229,31 @@ export class LicenseManager {
     if (!Array.isArray(payload.features) || payload.features.some((value) => value.trim().length === 0)) {
       throw new LicenseError('License payload features must contain non-empty strings');
     }
+  }
+
+  private buildKeySecrets(options: LicenseManagerOptions): Map<string, string> {
+    const map = new Map<string, string>();
+
+    if (options.signingSecrets) {
+      for (const [keyId, secret] of Object.entries(options.signingSecrets)) {
+        if (!secret || secret.trim().length < 16) {
+          throw new LicenseError('Each signing secret must be at least 16 characters long', {
+            keyId,
+          });
+        }
+
+        map.set(keyId, secret);
+      }
+    }
+
+    if (options.signingSecret) {
+      if (options.signingSecret.trim().length < 16) {
+        throw new LicenseError('Signing secret must be provided and at least 16 characters long');
+      }
+
+      map.set(options.defaultKeyId ?? 'v1', options.signingSecret);
+    }
+
+    return map;
   }
 }

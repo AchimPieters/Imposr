@@ -1,0 +1,8 @@
+{
+  "id": "evt_paddle_revoked_1",
+  "type": "license.revoked",
+  "createdAt": "2026-04-20T12:00:00.000Z",
+  "data": {
+    "licenseKey": "__LICENSE_KEY__"
+  }
+}
