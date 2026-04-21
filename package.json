@@ -25,7 +25,8 @@
     "typecheck": "tsc --noEmit",
     "cli": "node dist/cli/index.js",
     "api": "node dist/api/server.js",
-    "beta:ready": "npm run build:main && node dist/cli/beta-ready.js --release-root . --evidence docs/sdk_smoke_evidence.json --output docs/BETA_READINESS_REPORT.json"
+    "beta:ready": "npm run build:main && node dist/cli/beta-ready.js --release-root . --evidence docs/sdk_smoke_evidence.json --output docs/BETA_READINESS_REPORT.json",
+    "beta:prepare": "npm run build:main && node dist/cli/beta-prepare.js --release-root . --evidence docs/sdk_smoke_evidence.json --report docs/BETA_READINESS_REPORT.json"
   },
   "dependencies": {
     "electron-updater": "^6.1.7",

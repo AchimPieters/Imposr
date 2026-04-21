@@ -213,9 +213,26 @@ Dit genereert (afhankelijk van flags) onder andere:
 
 ## Acrobat plug-in gebruiken (host-omgeving)
 
-### Build met Adobe SDK
+### Build met Adobe SDK (aanbevolen script)
 
-Stel `ACROBAT_SDK_DIR` in en bouw met plugin aan:
+Gebruik op macOS direct het helper-script (bouwt standaard **met** plugin):
+
+```bash
+./scripts/build_installer_macos.sh --acrobat-sdk-dir "/pad/naar/AcrobatSDK"
+```
+
+- Default deploy-doel: `/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins`
+- Met handmatige override:
+
+```bash
+./scripts/build_installer_macos.sh \
+  --acrobat-sdk-dir "/pad/naar/AcrobatSDK" \
+  --acrobat-plugin-install-dir "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins"
+```
+
+Wil je expliciet zonder plugin bouwen, gebruik dan `--without-plugin`.
+
+Alternatief (handmatige CMake flow):
 
 ```bash
 cmake -S . -B build-plugin \
@@ -224,8 +241,6 @@ cmake -S . -B build-plugin \
   -DAIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=ON
 cmake --build build-plugin -j
 ```
-
-Daarna plaats/laad je de plugin volgens de normale Acrobat SDK host-instructies.
 
 ### Smoke-test runbook
 
