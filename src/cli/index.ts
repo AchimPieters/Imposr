@@ -3,7 +3,6 @@ import 'module-alias/register';
 import { Command } from 'commander';
 import { runBatchCommand } from './commands/batch';
 import { runBetaCommand } from './commands/beta';
-import { runBetaReleaseOrchestration } from '../commercial/BetaReleaseOrchestrator';
 import { runImposeCommand } from './commands/impose';
 import {
   runTemplateListCommand,
@@ -108,30 +107,6 @@ program
       process.exitCode = report.overallPassed ? 0 : 2;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown beta:ready command error';
-      cliLogger.error(message);
-      process.exitCode = 1;
-    }
-  });
-
-
-program
-  .command('beta:prepare')
-  .option('--release-root <path>', 'Repository root path', process.cwd())
-  .option('--evidence <path>', 'Path to sdk smoke evidence JSON', 'docs/sdk_smoke_evidence.json')
-  .option('--report <path>', 'Path to write beta readiness report', 'docs/BETA_READINESS_REPORT.json')
-  .option('--coverage', 'Run coverage instead of standard tests', false)
-  .action(async (raw: Record<string, string | boolean>) => {
-    try {
-      const report = await runBetaReleaseOrchestration({
-        releaseRoot: String(raw.releaseRoot),
-        evidencePath: String(raw.evidence),
-        reportPath: String(raw.report),
-        runCoverage: Boolean(raw.coverage),
-      });
-      cliLogger.info(JSON.stringify(report, null, 2));
-      process.exitCode = report.overallPassed ? 0 : 2;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown beta:prepare command error';
       cliLogger.error(message);
       process.exitCode = 1;
     }
