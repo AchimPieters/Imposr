@@ -96,3 +96,41 @@ sudo codesign --force --sign - "$PLUGIN_TARGET" || true
 
 echo "[OK] Plugin geïnstalleerd: $PLUGIN_TARGET"
 echo "[INFO] Herstart Adobe Acrobat volledig om de plugin te laden."
+
+
+prompt_cleanup() {
+  if [[ ! -t 0 ]]; then
+    return
+  fi
+
+  local reply
+  printf "Wil je installatiebestanden opruimen (dmg/volume)? [y/N]: "
+  read -r reply || true
+  if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+    return
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  if [[ "$script_dir" == /Volumes/* ]]; then
+    local volume="/Volumes/${script_dir#/Volumes/}"
+    volume="${volume%%/*}"
+    volume="/Volumes/$volume"
+
+    local dmg_path
+    dmg_path="$(hdiutil info | awk -v vol="$volume" '$0 ~ vol {found=1} found && $1=="image-path" {print $2; exit}')"
+
+    hdiutil detach "$volume" >/dev/null 2>&1 || true
+
+    if [[ -n "$dmg_path" && -f "$dmg_path" ]]; then
+      osascript -e 'on run argv
+set p to item 1 of argv
+tell application "Finder" to delete POSIX file p
+end run' "$dmg_path" >/dev/null 2>&1 || true
+      echo "[OK] Installatiebestand verplaatst naar prullenmand: $dmg_path"
+    fi
+  fi
+}
+
+prompt_cleanup
