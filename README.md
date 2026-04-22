@@ -213,9 +213,55 @@ Dit genereert (afhankelijk van flags) onder andere:
 
 ## Acrobat plug-in gebruiken (host-omgeving)
 
-### Build met Adobe SDK
+### Build met Adobe SDK (aanbevolen script)
 
-Stel `ACROBAT_SDK_DIR` in en bouw met plugin aan:
+Gebruik op macOS direct het helper-script (bouwt standaard **met** plugin):
+
+```bash
+./scripts/build_installer_macos.sh --acrobat-sdk-dir "/pad/naar/AcrobatSDK"
+```
+
+Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch SDK-mappen in je HOME te vinden (maxdepth 5, naammatch op `acrobat` + `sdk`), pakt Acrobat SDK zip-bestanden uit `~/Downloads` uit.
+
+- Default deploy-doel: `/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins`
+- Met handmatige override:
+
+```bash
+./scripts/build_installer_macos.sh \
+  --acrobat-sdk-dir "/pad/naar/AcrobatSDK" \
+  --acrobat-plugin-install-dir "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins"
+```
+
+Wil je expliciet zonder plugin bouwen, gebruik dan `--without-plugin`.
+
+Wil je hard falen als plugin-SDK ontbreekt, gebruik `--require-plugin`.
+
+
+Het build-script genereert nu ook automatisch een `.pkg`:
+
+- `build-package/Imposr-Acrobat-Plugin-0.1.0.pkg`
+
+Deze `.pkg` installeert de plugin automatisch in de gevonden Acrobat installatie (DC of nieuwe Acrobat). Gebruik dit pakket voor testgebruikers die geen handmatige stappen moeten doen.
+
+Na installatie staat ook een volledige uninstaller klaar op:
+
+- `/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh`
+
+Deze ruimt pluginbestanden op in Acrobat én verwijdert `/usr/local/imposr` payload.
+
+Als fallback kun je nog steeds handmatig vanaf een gemounte image draaien:
+
+```bash
+./install_acrobat_plugin_macos.sh
+```
+
+Handmatige uninstall vanaf gemounte image:
+
+```bash
+./uninstall_acrobat_plugin_macos.sh
+```
+
+Alternatief (handmatige CMake flow):
 
 ```bash
 cmake -S . -B build-plugin \
@@ -224,8 +270,6 @@ cmake -S . -B build-plugin \
   -DAIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=ON
 cmake --build build-plugin -j
 ```
-
-Daarna plaats/laad je de plugin volgens de normale Acrobat SDK host-instructies.
 
 ### Smoke-test runbook
 
