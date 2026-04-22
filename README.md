@@ -221,7 +221,7 @@ Gebruik op macOS direct het helper-script (bouwt standaard **met** plugin):
 ./scripts/build_installer_macos.sh --acrobat-sdk-dir "/pad/naar/AcrobatSDK"
 ```
 
-Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch SDK-mappen in je HOME te vinden (maxdepth 5, naammatch op `acrobat` + `sdk`), pakt Acrobat SDK zip-bestanden uit `~/Downloads` uit, en opent als laatste fallback een Finder map-chooser.
+Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch SDK-mappen in je HOME te vinden (maxdepth 5, naammatch op `acrobat` + `sdk`), pakt Acrobat SDK zip-bestanden uit `~/Downloads` uit.
 
 - Default deploy-doel: `/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins`
 - Met handmatige override:
@@ -233,6 +233,8 @@ Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch S
 ```
 
 Wil je expliciet zonder plugin bouwen, gebruik dan `--without-plugin`.
+
+Wil je hard falen als plugin-SDK ontbreekt, gebruik `--require-plugin`.
 
 
 Het build-script genereert nu ook automatisch een `.pkg`:

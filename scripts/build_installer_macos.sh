@@ -8,17 +8,17 @@ ACROBAT_SDK_DIR_VALUE="${ACROBAT_SDK_DIR:-}"
 ACROBAT_PLUGIN_INSTALL_DIR=""
 JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
 PLUGIN_VERSION="0.1.0"
-REQUIRE_PLUGIN="true"
+REQUIRE_PLUGIN="false"
 
 usage() {
   cat <<USAGE
 Gebruik:
-  ./scripts/build_installer_macos.sh [--without-plugin] [--with-plugin] [--acrobat-sdk-dir PAD] [--acrobat-plugin-install-dir PAD] [--build-dir MAP] [--jobs N]
+  ./scripts/build_installer_macos.sh [--without-plugin] [--with-plugin] [--require-plugin] [--acrobat-sdk-dir PAD] [--acrobat-plugin-install-dir PAD] [--build-dir MAP] [--jobs N]
 
 Standaard:
   - Bouwt installer/packages via CPack (DragNDrop/TGZ)
-  - Bouwt standaard MET Acrobat plug-in
-  - Probeert ontbrekende SDK interactief te vragen via Finder folder picker
+  - Probeert standaard MET Acrobat plug-in te bouwen
+  - Valt automatisch terug naar CLI-only build als SDK ontbreekt (geen GUI prompts)
   - Genereert extra .pkg installer voor automatische plugin-installatie in Acrobat
 USAGE
 }
@@ -77,30 +77,6 @@ auto_extract_acrobat_sdk_archive() {
       return
     fi
   done < <(find "$extract_root" -maxdepth 6 -type d \( -iname "*acrobat*sdk*" -o -iname "*adobe*acrobat*sdk*" -o -iname "*sdk*" \) 2>/dev/null)
-}
-
-prompt_acrobat_sdk_dir_macos() {
-  if [[ ! -t 0 ]]; then
-    return
-  fi
-
-  if ! command -v osascript >/dev/null 2>&1; then
-    return
-  fi
-
-  local selected
-  local attempts=0
-  while [[ $attempts -lt 3 ]]; do
-    selected="$(osascript -e 'POSIX path of (choose folder with prompt "Selecteer Adobe Acrobat SDK map (moet API/ bevatten)")' 2>/dev/null || true)"
-    selected="${selected%$'
-'}"
-    if [[ -n "$selected" && -d "$selected/API" ]]; then
-      ACROBAT_SDK_DIR_VALUE="$selected"
-      echo "[OK] Acrobat SDK gekozen via Finder: $ACROBAT_SDK_DIR_VALUE"
-      return
-    fi
-    attempts=$((attempts + 1))
-  done
 }
 
 auto_detect_acrobat_sdk_dir() {
@@ -257,6 +233,10 @@ while [[ $# -gt 0 ]]; do
       WITH_PLUGIN="false"
       shift
       ;;
+    --require-plugin)
+      REQUIRE_PLUGIN="true"
+      shift
+      ;;
     --acrobat-sdk-dir)
       ACROBAT_SDK_DIR_VALUE="${2:-}"
       shift 2
@@ -306,20 +286,23 @@ if [[ "$WITH_PLUGIN" == "true" ]]; then
   auto_detect_acrobat_sdk_dir
 
   if [[ -z "$ACROBAT_SDK_DIR_VALUE" ]]; then
-    prompt_acrobat_sdk_dir_macos
-  fi
+    if [[ "$REQUIRE_PLUGIN" == "true" ]]; then
+      echo "[ERROR] Acrobat plugin build vereist Adobe Acrobat SDK." >&2
+      echo "[ERROR] Geef --acrobat-sdk-dir op of zet ACROBAT_SDK_DIR. Voorbeeld:" >&2
+      echo "        ./scripts/build_installer_macos.sh --acrobat-sdk-dir \"$HOME/Downloads/Adobe Acrobat SDK\"" >&2
+      echo "[ERROR] Tip: script scant automatisch HOME + Downloads zip zonder GUI prompts." >&2
+      exit 1
+    fi
 
-  if [[ -z "$ACROBAT_SDK_DIR_VALUE" ]]; then
-    echo "[ERROR] Acrobat plugin build vereist Adobe Acrobat SDK." >&2
-    echo "[ERROR] Geef --acrobat-sdk-dir op of zet ACROBAT_SDK_DIR. Voorbeeld:" >&2
-    echo "        ./scripts/build_installer_macos.sh --acrobat-sdk-dir "$HOME/Downloads/Adobe Acrobat SDK"" >&2
-    echo "[ERROR] Tip: script scant automatisch HOME + Downloads zip en opent Finder folder picker." >&2
-    exit 1
+    echo "[WARN] Geen Acrobat SDK gevonden; val terug naar CLI-only build." >&2
+    echo "[WARN] Gebruik --require-plugin om hard te falen als plugin verplicht is." >&2
+    WITH_PLUGIN="false"
+    PLUGIN_FLAG="OFF"
+  else
+    export ACROBAT_SDK_DIR="$ACROBAT_SDK_DIR_VALUE"
+    echo "[OK] Gebruik Acrobat SDK: $ACROBAT_SDK_DIR"
+    PLUGIN_FLAG="ON"
   fi
-
-  export ACROBAT_SDK_DIR="$ACROBAT_SDK_DIR_VALUE"
-  echo "[OK] Gebruik Acrobat SDK: $ACROBAT_SDK_DIR"
-  PLUGIN_FLAG="ON"
 
 else
   echo "[WARN] Plugin build is uitgeschakeld (--without-plugin)."
