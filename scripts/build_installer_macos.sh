@@ -7,6 +7,7 @@ WITH_PLUGIN="true"
 ACROBAT_SDK_DIR_VALUE="${ACROBAT_SDK_DIR:-}"
 ACROBAT_PLUGIN_INSTALL_DIR=""
 JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
+PLUGIN_VERSION="0.1.0"
 
 usage() {
   cat <<USAGE
@@ -16,6 +17,7 @@ Gebruik:
 Standaard:
   - Bouwt installer/packages via CPack (DragNDrop/TGZ)
   - Bouwt MET Acrobat plug-in
+  - Genereert extra .pkg installer voor automatische plugin-installatie in Acrobat
 USAGE
 }
 
@@ -46,6 +48,35 @@ detect_acrobat_plugin_install_dir() {
   ACROBAT_PLUGIN_INSTALL_DIR="${candidates[0]}"
 }
 
+auto_extract_acrobat_sdk_archive() {
+  local archives=()
+  while IFS= read -r archive; do
+    archives+=("$archive")
+  done < <(find "$HOME/Downloads" -maxdepth 2 -type f \( -iname "*acrobat*sdk*.zip" -o -iname "*adobe*acrobat*.zip" \) 2>/dev/null)
+
+  if [[ ${#archives[@]} -eq 0 ]]; then
+    return
+  fi
+
+  local extract_root="$HOME/Adobe/AcrobatSDK-auto"
+  mkdir -p "$extract_root"
+
+  local archive
+  for archive in "${archives[@]}"; do
+    echo "[INFO] Probeer SDK archive uit te pakken: $archive"
+    unzip -qo "$archive" -d "$extract_root" || true
+  done
+
+  local candidate
+  while IFS= read -r candidate; do
+    if [[ -d "$candidate/API" ]]; then
+      ACROBAT_SDK_DIR_VALUE="$candidate"
+      echo "[OK] Acrobat SDK automatisch gevonden na extract: $candidate"
+      return
+    fi
+  done < <(find "$extract_root" -maxdepth 6 -type d \( -iname "*acrobat*sdk*" -o -iname "*adobe*acrobat*sdk*" -o -iname "*sdk*" \) 2>/dev/null)
+}
+
 auto_detect_acrobat_sdk_dir() {
   if [[ -n "$ACROBAT_SDK_DIR_VALUE" ]]; then
     return
@@ -54,6 +85,8 @@ auto_detect_acrobat_sdk_dir() {
   local candidates=(
     "$HOME/Adobe/AcrobatSDK"
     "$HOME/Downloads/AcrobatSDK"
+    "$HOME/Documents/AcrobatSDK"
+    "$HOME/Desktop/AcrobatSDK"
     "/Applications/Adobe Acrobat SDK"
     "/opt/acrobat-sdk"
   )
@@ -65,7 +98,17 @@ auto_detect_acrobat_sdk_dir() {
       return
     fi
   done
+
+  while IFS= read -r candidate; do
+    if [[ -d "$candidate/API" ]]; then
+      ACROBAT_SDK_DIR_VALUE="$candidate"
+      return
+    fi
+  done < <(find "$HOME" -maxdepth 5 -type d \( -iname "*acrobat*sdk*" -o -iname "*adobe*acrobat*sdk*" \) 2>/dev/null)
+
+  auto_extract_acrobat_sdk_archive
 }
+
 
 ensure_xcode_cli() {
   if xcode-select -p >/dev/null 2>&1; then
@@ -115,6 +158,67 @@ ensure_brew_tool() {
     echo "[ERROR] Installatie van $tool lijkt mislukt." >&2
     exit 1
   fi
+}
+
+create_auto_plugin_pkg() {
+  local plugin_src="$1"
+  local pkg_root="$BUILD_DIR/pkgroot"
+  local pkg_scripts="$BUILD_DIR/pkgscripts"
+  local pkg_out="$BUILD_DIR/Imposr-Acrobat-Plugin-${PLUGIN_VERSION}.pkg"
+
+  rm -rf "$pkg_root" "$pkg_scripts"
+  mkdir -p "$pkg_root/usr/local/imposr/lib" "$pkg_root/usr/local/imposr/bin" "$pkg_scripts"
+  cp -f "$plugin_src" "$pkg_root/usr/local/imposr/lib/libAcrobatImpositionPlugin.dylib"
+  cp -f "scripts/uninstall_acrobat_plugin_macos.sh" "$pkg_root/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh"
+  chmod +x "$pkg_root/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh"
+
+  cat > "$pkg_scripts/postinstall" <<'POSTINSTALL'
+#!/bin/bash
+set -euo pipefail
+
+PLUGIN_SRC="/usr/local/imposr/lib/libAcrobatImpositionPlugin.dylib"
+TARGETS=(
+  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.dylib"
+  "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.dylib"
+)
+
+if [[ ! -f "$PLUGIN_SRC" ]]; then
+  echo "[ERROR] Plugin source missing: $PLUGIN_SRC" >&2
+  exit 1
+fi
+
+installed="false"
+for target in "${TARGETS[@]}"; do
+  plugin_dir="$(dirname "$target")"
+  app_bundle="${plugin_dir%/Contents/Plug-ins}"
+  if [[ -d "$app_bundle" ]]; then
+    mkdir -p "$plugin_dir"
+    cp -f "$PLUGIN_SRC" "$target"
+    xattr -dr com.apple.quarantine "$target" || true
+    codesign --force --sign - "$target" || true
+    echo "[OK] Plugin deployed to: $target"
+    installed="true"
+  fi
+done
+
+if [[ "$installed" != "true" ]]; then
+  echo "[WARN] No Acrobat app bundle found; plugin copied to /usr/local/imposr/lib only."
+fi
+
+exit 0
+POSTINSTALL
+
+  chmod +x "$pkg_scripts/postinstall"
+
+  pkgbuild \
+    --root "$pkg_root" \
+    --scripts "$pkg_scripts" \
+    --identifier "com.imposr.acrobat.plugin" \
+    --version "$PLUGIN_VERSION" \
+    "$pkg_out"
+
+  echo "[OK] Automatische plugin-installer gemaakt: $pkg_out"
+  echo "[OK] Uninstaller in pkg payload: /usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -167,13 +271,19 @@ ensure_xcode_cli
 ensure_brew
 ensure_brew_tool cmake cmake
 ensure_brew_tool python3 python
+if ! command_exists pkgbuild; then
+  echo "[ERROR] pkgbuild niet gevonden. Installeer Xcode Command Line Tools volledig." >&2
+  exit 1
+fi
 
 if [[ "$WITH_PLUGIN" == "true" ]]; then
   auto_detect_acrobat_sdk_dir
   if [[ -z "$ACROBAT_SDK_DIR_VALUE" ]]; then
     echo "[ERROR] Acrobat plugin build vereist Adobe Acrobat SDK." >&2
     echo "[ERROR] Geef --acrobat-sdk-dir op of zet ACROBAT_SDK_DIR. Voorbeeld:" >&2
-    echo "        ./scripts/build_installer_macos.sh --acrobat-sdk-dir \"$HOME/Adobe/AcrobatSDK\"" >&2
+    echo "        ./scripts/build_installer_macos.sh --acrobat-sdk-dir \"$HOME/Downloads/Adobe Acrobat SDK\"" >&2
+    echo "[ERROR] Tip: script scant nu automatisch je HOME (maxdepth 5) naar mappen met acrobat/sdk in de naam." >&2
+    echo "[ERROR] Tip: script probeert ook Acrobat SDK zip-bestanden in ~/Downloads automatisch uit te pakken." >&2
     exit 1
   fi
   export ACROBAT_SDK_DIR="$ACROBAT_SDK_DIR_VALUE"
@@ -213,13 +323,10 @@ if [[ "$WITH_PLUGIN" == "true" ]]; then
   sudo codesign --force --sign - "$PLUGIN_DST" || true
   echo "[OK] Plugin gedeployed naar: $PLUGIN_DST"
 
+  create_auto_plugin_pkg "$PLUGIN_SRC"
+
   UNINSTALL_SCRIPT="$BUILD_DIR/uninstall-plugin.sh"
-  cat > "$UNINSTALL_SCRIPT" <<UNINSTALL
-#!/usr/bin/env bash
-set -euo pipefail
-sudo rm -f "$PLUGIN_DST"
-echo "Plugin verwijderd: $PLUGIN_DST"
-UNINSTALL
+  cp -f scripts/uninstall_acrobat_plugin_macos.sh "$UNINSTALL_SCRIPT"
   chmod +x "$UNINSTALL_SCRIPT"
   echo "[OK] Deinstaller script gemaakt: $UNINSTALL_SCRIPT"
 fi

@@ -221,6 +221,8 @@ Gebruik op macOS direct het helper-script (bouwt standaard **met** plugin):
 ./scripts/build_installer_macos.sh --acrobat-sdk-dir "/pad/naar/AcrobatSDK"
 ```
 
+Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch SDK-mappen in je HOME te vinden (maxdepth 5, naammatch op `acrobat` + `sdk`) en pakt het ook Acrobat SDK zip-bestanden uit `~/Downloads` automatisch uit.
+
 - Default deploy-doel: `/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins`
 - Met handmatige override:
 
@@ -231,6 +233,30 @@ Gebruik op macOS direct het helper-script (bouwt standaard **met** plugin):
 ```
 
 Wil je expliciet zonder plugin bouwen, gebruik dan `--without-plugin`.
+
+Het build-script genereert nu ook automatisch een `.pkg`:
+
+- `build-package/Imposr-Acrobat-Plugin-0.1.0.pkg`
+
+Deze `.pkg` installeert de plugin automatisch in de gevonden Acrobat installatie (DC of nieuwe Acrobat). Gebruik dit pakket voor testgebruikers die geen handmatige stappen moeten doen.
+
+Na installatie staat ook een volledige uninstaller klaar op:
+
+- `/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh`
+
+Deze ruimt pluginbestanden op in Acrobat én verwijdert `/usr/local/imposr` payload.
+
+Als fallback kun je nog steeds handmatig vanaf een gemounte image draaien:
+
+```bash
+./install_acrobat_plugin_macos.sh
+```
+
+Handmatige uninstall vanaf gemounte image:
+
+```bash
+./uninstall_acrobat_plugin_macos.sh
+```
 
 Alternatief (handmatige CMake flow):
 

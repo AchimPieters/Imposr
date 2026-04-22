@@ -176,6 +176,15 @@ if(AIMP_ENABLE_PACKAGING)
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
       RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
+
+    if(APPLE)
+      install(PROGRAMS
+        scripts/install_acrobat_plugin_macos.sh
+        scripts/uninstall_acrobat_plugin_macos.sh
+        COMPONENT runtime
+        DESTINATION .
+      )
+    endif()
   endif()
 
   install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT devel)
