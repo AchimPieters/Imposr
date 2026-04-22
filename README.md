@@ -234,6 +234,8 @@ Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch S
 
 Wil je expliciet zonder plugin bouwen, gebruik dan `--without-plugin`.
 
+Wil je in CI hard falen als SDK ontbreekt, gebruik `--require-plugin`.
+
 Het build-script genereert nu ook automatisch een `.pkg`:
 
 - `build-package/Imposr-Acrobat-Plugin-0.1.0.pkg`
