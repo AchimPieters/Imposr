@@ -9,9 +9,9 @@
     "dev": "concurrently \"npm:dev:*\"",
     "dev:main": "webpack --config webpack.main.config.js --mode development --watch",
     "dev:renderer": "webpack serve --config webpack.renderer.config.js --mode development",
-    "build": "npm run build:main && npm run build:renderer",
-    "build:main": "webpack --config webpack.main.config.js --mode production",
-    "build:renderer": "webpack --config webpack.renderer.config.js --mode production",
+    "build": "npm run build:main",
+    "build:main": "tsc --project tsconfig.json",
+    "build:renderer": "node -e \"console.log('Renderer build is not configured in this repository')\"",
     "package": "electron-builder build --publish never",
     "package:all": "electron-builder build -mwl --publish never",
     "release": "electron-builder build --publish always",
@@ -24,7 +24,9 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "typecheck": "tsc --noEmit",
     "cli": "node dist/cli/index.js",
-    "api": "node dist/api/server.js"
+    "api": "node dist/api/server.js",
+    "beta:ready": "npm run build:main && node dist/cli/beta-ready.js --release-root . --evidence docs/sdk_smoke_evidence.json --output docs/BETA_READINESS_REPORT.json",
+    "beta:prepare": "npm run build:main && node dist/cli/beta-prepare.js --release-root . --evidence docs/sdk_smoke_evidence.json --report docs/BETA_READINESS_REPORT.json"
   },
   "dependencies": {
     "electron-updater": "^6.1.7",
@@ -59,7 +61,8 @@
     "posthog-node": "^3.6.3",
     "dayjs": "^1.11.10",
     "zod": "^3.22.4",
-    "immer": "^10.0.3"
+    "immer": "^10.0.3",
+    "module-alias": "^2.2.3"
   },
   "devDependencies": {
     "electron": "^28.1.0",
@@ -141,5 +144,11 @@
       "owner": "AchimPieters",
       "repo": "Imposr"
     }
+  },
+  "_moduleAliases": {
+    "@core": "dist/core",
+    "@renderer": "dist/renderer",
+    "@utils": "dist/utils",
+    "@licensing": "dist/licensing"
   }
 }
