@@ -115,9 +115,17 @@ if(AIMP_BUILD_PLUGIN)
   # Add required Acrobat SDK import libraries here after matching your SDK layout.
   # target_link_libraries(${PLUGIN_NAME} PRIVATE ...)
 
-  set_target_properties(${PLUGIN_NAME} PROPERTIES
-    OUTPUT_NAME "AcrobatImpositionPlugin"
-  )
+  if(APPLE)
+    set_target_properties(${PLUGIN_NAME} PROPERTIES
+      OUTPUT_NAME "AcrobatImpositionPlugin"
+      PREFIX ""
+      SUFFIX ".api"
+    )
+  else()
+    set_target_properties(${PLUGIN_NAME} PROPERTIES
+      OUTPUT_NAME "AcrobatImpositionPlugin"
+    )
+  endif()
 endif()
 
 if(AIMP_BUILD_CLI)

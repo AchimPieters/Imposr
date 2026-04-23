@@ -10,7 +10,7 @@ Gebruik:
   ./install_acrobat_plugin_macos.sh [--plugin-source PAD] [--install-dir PAD]
 
 Standaard:
-  - Zoekt plugin in ./lib/libAcrobatImpositionPlugin.dylib (naast dit script)
+  - Zoekt plugin in ./lib/AcrobatImpositionPlugin.api (naast dit script)
   - Deployt naar standaard Acrobat Plug-ins map (DC of nieuwe Acrobat)
 USAGE
 }
@@ -45,14 +45,14 @@ detect_plugin_source() {
 
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local default_path="$script_dir/lib/libAcrobatImpositionPlugin.dylib"
+  local default_path="$script_dir/lib/AcrobatImpositionPlugin.api"
   if [[ -f "$default_path" ]]; then
     PLUGIN_SOURCE="$default_path"
     return
   fi
 
   echo "[ERROR] Plugin bronbestand niet gevonden: $default_path" >&2
-  echo "[ERROR] Geef --plugin-source op met een geldig pad naar libAcrobatImpositionPlugin.dylib" >&2
+  echo "[ERROR] Geef --plugin-source op met een geldig pad naar AcrobatImpositionPlugin.api" >&2
   exit 1
 }
 
@@ -86,7 +86,7 @@ if [[ ! -f "$PLUGIN_SOURCE" ]]; then
   exit 1
 fi
 
-PLUGIN_TARGET="$PLUGIN_INSTALL_DIR/AcrobatImpositionPlugin.dylib"
+PLUGIN_TARGET="$PLUGIN_INSTALL_DIR/AcrobatImpositionPlugin.api"
 
 echo "[INFO] Installeer plugin naar: $PLUGIN_TARGET"
 sudo mkdir -p "$PLUGIN_INSTALL_DIR"

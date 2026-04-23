@@ -9,7 +9,7 @@ Gebruik:
   ./uninstall_acrobat_plugin_macos.sh [--keep-receipt]
 
 Standaard:
-  - Verwijdert AcrobatImpositionPlugin.dylib uit bekende Acrobat installaties
+  - Verwijdert AcrobatImpositionPlugin.api uit bekende Acrobat installaties
   - Verwijdert /usr/local/imposr (plugin payload + installer scripts)
   - Vergeet pkg receipt com.imposr.acrobat.plugin
 USAGE
@@ -34,8 +34,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 TARGETS=(
-  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.dylib"
-  "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.dylib"
+  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
+  "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
 )
 
 for target in "${TARGETS[@]}"; do

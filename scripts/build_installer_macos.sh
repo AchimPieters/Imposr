@@ -170,7 +170,7 @@ create_auto_plugin_pkg() {
 
   rm -rf "$pkg_root" "$pkg_scripts"
   mkdir -p "$pkg_root/usr/local/imposr/lib" "$pkg_root/usr/local/imposr/bin" "$pkg_scripts"
-  cp -f "$plugin_src" "$pkg_root/usr/local/imposr/lib/libAcrobatImpositionPlugin.dylib"
+  cp -f "$plugin_src" "$pkg_root/usr/local/imposr/lib/AcrobatImpositionPlugin.api"
   cp -f "scripts/uninstall_acrobat_plugin_macos.sh" "$pkg_root/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh"
   chmod +x "$pkg_root/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh"
 
@@ -178,10 +178,10 @@ create_auto_plugin_pkg() {
 #!/bin/bash
 set -euo pipefail
 
-PLUGIN_SRC="/usr/local/imposr/lib/libAcrobatImpositionPlugin.dylib"
+PLUGIN_SRC="/usr/local/imposr/lib/AcrobatImpositionPlugin.api"
 TARGETS=(
-  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.dylib"
-  "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.dylib"
+  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
+  "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
 )
 
 if [[ ! -f "$PLUGIN_SRC" ]]; then
@@ -325,8 +325,8 @@ echo "[4/4] Genereer installers/packages"
 cpack --config "$BUILD_DIR/CPackConfig.cmake" -C "$BUILD_TYPE"
 
 if [[ "$WITH_PLUGIN" == "true" ]]; then
-  PLUGIN_SRC="$BUILD_DIR/libAcrobatImpositionPlugin.dylib"
-  PLUGIN_DST="$ACROBAT_PLUGIN_INSTALL_DIR/AcrobatImpositionPlugin.dylib"
+  PLUGIN_SRC="$BUILD_DIR/AcrobatImpositionPlugin.api"
+  PLUGIN_DST="$ACROBAT_PLUGIN_INSTALL_DIR/AcrobatImpositionPlugin.api"
   if [[ ! -f "$PLUGIN_SRC" ]]; then
     echo "[ERROR] Verwachte plugin artifact ontbreekt: $PLUGIN_SRC" >&2
     exit 1
