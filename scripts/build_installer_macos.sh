@@ -162,6 +162,30 @@ ensure_brew_tool() {
   fi
 }
 
+ensure_python_package() {
+  local package="$1"
+  local import_name="${2:-$1}"
+
+  if python3 -c "import $import_name" 2>/dev/null; then
+    echo "[OK] Python package '$package' gevonden"
+    return
+  fi
+
+  echo "[INFO] Python package '$package' ontbreekt; probeer te installeren"
+  # Try in order: --break-system-packages (Homebrew Python on macOS ≥14),
+  # plain pip3, system pip — all non-fatal since Pillow is only used for
+  # the DMG background (fallback: no background).
+  python3 -m pip install "$package" --quiet --break-system-packages 2>/dev/null || \
+  python3 -m pip install "$package" --quiet 2>/dev/null || \
+  pip3 install "$package" --quiet 2>/dev/null || true
+
+  if python3 -c "import $import_name" 2>/dev/null; then
+    echo "[OK] $package geïnstalleerd"
+  else
+    echo "[WARN] $package kon niet worden geïnstalleerd — DMG-achtergrond wordt overgeslagen (niet kritiek)."
+  fi
+}
+
 create_auto_plugin_pkg() {
   local plugin_src="$1"
   local pkg_root="$BUILD_DIR/pkgroot"
@@ -272,11 +296,13 @@ if [[ ! -d "${ACROBAT_PLUGIN_INSTALL_DIR%/Contents/Plug-ins}" ]]; then
   echo "[WARN] Gebruik eventueel --acrobat-plugin-install-dir om expliciet pad te zetten."
 fi
 
-echo "[1/4] Controleer/verzamel vereiste tools"
+echo "[1/5] Controleer/verzamel vereiste tools"
 ensure_xcode_cli
 ensure_brew
 ensure_brew_tool cmake cmake
 ensure_brew_tool python3 python
+ensure_brew_tool create-dmg create-dmg   # polished DMG window layout
+ensure_python_package Pillow PIL         # DMG background image generation (optional)
 if ! command_exists pkgbuild; then
   echo "[ERROR] pkgbuild niet gevonden. Installeer Xcode Command Line Tools volledig." >&2
   exit 1
@@ -309,7 +335,7 @@ else
   PLUGIN_FLAG="OFF"
 fi
 
-echo "[2/4] Configureer packaging build"
+echo "[2/5] Configureer packaging build"
 cmake -S . -B "$BUILD_DIR" \
   -DAIMP_BUILD_PLUGIN="$PLUGIN_FLAG" \
   -DAIMP_ACROBAT_PLUGIN_INSTALL_DIR="$ACROBAT_PLUGIN_INSTALL_DIR" \
@@ -318,11 +344,58 @@ cmake -S . -B "$BUILD_DIR" \
   -DAIMP_ENABLE_PACKAGING=ON \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
 
-echo "[3/4] Bouw project"
+echo "[3/5] Bouw project"
 cmake --build "$BUILD_DIR" -j"$JOBS"
 
-echo "[4/4] Genereer installers/packages"
+echo "[4/5] Genereer installers/packages"
 cpack --config "$BUILD_DIR/CPackConfig.cmake" -C "$BUILD_TYPE"
+
+DIST_DIR="dist"
+mkdir -p "$DIST_DIR"
+
+# Move all generated CPack artifacts (dmg, tar.gz, zip) into dist/.
+for artifact in Imposr-*.dmg Imposr-*.tar.gz Imposr-*.zip; do
+  if [[ -f "$artifact" ]]; then
+    mv -f "$artifact" "$DIST_DIR/"
+    echo "[OK] Artifact verplaatst naar $DIST_DIR/: $artifact"
+  fi
+done
+
+# Always build a .pkg for the CLI installer so dist/ contains a working .pkg.
+create_cli_pkg() {
+  local cli_src="$BUILD_DIR/imposr_cli"
+  if [[ ! -f "$cli_src" ]]; then
+    echo "[WARN] imposr_cli binary niet gevonden; .pkg wordt overgeslagen." >&2
+    return
+  fi
+
+  local pkg_root="$BUILD_DIR/cli-pkgroot"
+  local pkg_scripts="$BUILD_DIR/cli-pkgscripts"
+  local pkg_out="$DIST_DIR/Imposr-${PLUGIN_VERSION}.pkg"
+
+  rm -rf "$pkg_root" "$pkg_scripts"
+  mkdir -p "$pkg_root/usr/local/bin" "$pkg_scripts"
+  cp -f "$cli_src" "$pkg_root/usr/local/bin/imposr_cli"
+  chmod +x "$pkg_root/usr/local/bin/imposr_cli"
+
+  cat > "$pkg_scripts/postinstall" <<'POSTINSTALL'
+#!/bin/bash
+echo "[Imposr] CLI installed at /usr/local/bin/imposr_cli"
+exit 0
+POSTINSTALL
+  chmod +x "$pkg_scripts/postinstall"
+
+  pkgbuild \
+    --root "$pkg_root" \
+    --scripts "$pkg_scripts" \
+    --identifier "com.imposr.cli" \
+    --version "$PLUGIN_VERSION" \
+    "$pkg_out"
+
+  echo "[OK] CLI installer aangemaakt: $pkg_out"
+}
+
+create_cli_pkg
 
 if [[ "$WITH_PLUGIN" == "true" ]]; then
   PLUGIN_SRC="$BUILD_DIR/AcrobatImpositionPlugin.api"
@@ -340,10 +413,35 @@ if [[ "$WITH_PLUGIN" == "true" ]]; then
 
   create_auto_plugin_pkg "$PLUGIN_SRC"
 
+  # Move plugin pkg to dist/ as well.
+  if [[ -f "$BUILD_DIR/Imposr-Acrobat-Plugin-${PLUGIN_VERSION}.pkg" ]]; then
+    mv -f "$BUILD_DIR/Imposr-Acrobat-Plugin-${PLUGIN_VERSION}.pkg" "$DIST_DIR/"
+    echo "[OK] Plugin pkg verplaatst naar $DIST_DIR/"
+  fi
+
   UNINSTALL_SCRIPT="$BUILD_DIR/uninstall-plugin.sh"
   cp -f scripts/uninstall_acrobat_plugin_macos.sh "$UNINSTALL_SCRIPT"
   chmod +x "$UNINSTALL_SCRIPT"
   echo "[OK] Deinstaller script gemaakt: $UNINSTALL_SCRIPT"
 fi
 
-echo "Klaar. Check artifacts in $BUILD_DIR/"
+# ── Build the QI+-style installer DMG ────────────────────────────────────────
+echo ""
+echo "[5/5] Bouw QI+-stijl installer DMG (Install Imposr.app in DMG)"
+
+DMG_PLUGIN_ARG=""
+if [[ "$WITH_PLUGIN" == "true" ]]; then
+  PLUGIN_SRC_FOR_DMG="$BUILD_DIR/AcrobatImpositionPlugin.api"
+  if [[ -f "$PLUGIN_SRC_FOR_DMG" ]]; then
+    DMG_PLUGIN_ARG="--plugin-path $PLUGIN_SRC_FOR_DMG"
+  fi
+fi
+
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build_dmg_macos.sh" \
+  --version "$PLUGIN_VERSION" \
+  --dist-dir "$DIST_DIR" \
+  ${DMG_PLUGIN_ARG}
+
+echo ""
+echo "Klaar. Check artifacts in $DIST_DIR/"
+ls -lh "$DIST_DIR/" 2>/dev/null || true

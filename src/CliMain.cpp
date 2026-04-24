@@ -1,12 +1,29 @@
 #include "aimp/ImpositionPlan.h"
 #include "aimp/PdfComposer.h"
 #include "aimp/Preset.h"
+#include "aimp/AdjustPages.h"
+#include "aimp/Annotations.h"
+#include "aimp/Bleed.h"
+#include "aimp/ImpositionInfo.h"
+#include "aimp/PageTools.h"
+#include "aimp/PdfX.h"
+#include "aimp/PrinterMarks.h"
+#include "aimp/SampleDocument.h"
+#include "aimp/Shuffle.h"
+#include "aimp/SplitMerge.h"
+#include "aimp/StickOn.h"
+#include "aimp/TilePages.h"
+#include "aimp/TrimShift.h"
+#include "aimp/VariableData.h"
+#include "EscapeUtils.h"
 
 #include <cstdint>
 #include <cstdlib>
 #include <charconv>
 #include <chrono>
 #include <ctime>
+#include <set>
+#include <thread>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -25,21 +42,10 @@
 
 namespace {
 
-std::string EscapeJsonString(const std::string& input) {
-    std::string out;
-    out.reserve(input.size() + 8);
-    for (char ch : input) {
-        switch (ch) {
-            case '\\': out += "\\\\"; break;
-            case '\"': out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out.push_back(ch); break;
-        }
-    }
-    return out;
-}
+using aimp::internal::EscapeJson;
+
+// Alias kept for all existing call sites in this file.
+inline std::string EscapeJsonString(const std::string& s) { return EscapeJson(s); }
 
 std::string BuildJobReportJson(const std::string& mode,
                                std::uint32_t pages,
@@ -92,14 +98,35 @@ std::string BuildJobReportJson(const std::string& mode,
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  imposr_cli two-up --pages <N> --sheet-width <pt> --sheet-height <pt> [--out <file>]\n"
-        << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--out <file>]\n"
-        << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--signature-size <N>] [--out <file>]\n"
-        << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--out <file>]\n"
-        << "  imposr_cli tile --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--tile-overlap <pt>] [--out <file>]\n"
+        << "  imposr_cli two-up --pages <N> --sheet-width <pt> --sheet-height <pt>\n"
+        << "  imposr_cli n-up --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N>\n"
+        << "  imposr_cli booklet --pages <N> --sheet-width <pt> --sheet-height <pt> [--signature-size <N>]\n"
+        << "  imposr_cli step-repeat --pages <N> --sheet-width <pt> --sheet-height <pt> --repeat-x <N> --repeat-y <N> --step-x <pt> --step-y <pt> --slot-width <pt> --slot-height <pt> [--repeat-rotation <degrees>]\n"
+        << "  imposr_cli tile --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> [--tile-overlap <pt>]\n"
         << "  imposr_cli manual --pages <N> --sheet-width <pt> --sheet-height <pt> --columns <N> --rows <N> --manual-sequence <csv>\n"
+        << "  imposr_cli trim-shift --pages <N> --sheet-width <pt> --sheet-height <pt> --creep <pt> [--signature-size <N>]\n"
+        << "  imposr_cli adjust-pages --pages <N> --sheet-width <pt> --sheet-height <pt> --adjust-mode scale|crop|extend|scale-to-fit|scale-to-fill [--scale-x <f>] [--scale-y <f>] [--target-width <pt>] [--target-height <pt>]\n"
+        << "  imposr_cli insert-blank --pages <N> --sheet-width <pt> --sheet-height <pt> --insert-at <N> [--insert-count <N>]\n"
+        << "  imposr_cli insert-file --pages <N> --sheet-width <pt> --sheet-height <pt> --insert-at <N> --insert-count <N> --insert-doc <id>\n"
+        << "  imposr_cli insert-conditional --pages <N> --sheet-width <pt> --sheet-height <pt> [--pad-multiple N] [--insert-at <N>] [--filter even|odd]\n"
+        << "  imposr_cli watch-dir --watch-dir <path> --pages <N> --sheet-width <pt> --sheet-height <pt> [--watch-interval <sec>] [--columns <N> --rows <N>]\n"
+        << "  imposr_cli sample-doc --pages <N> --pdf-out <file> [--sample-page-width <pt>] [--sample-page-height <pt>] [--sample-diagonals 0|1]\n"
+        << "  imposr_cli imposition-info --pages <N> --sheet-width <pt> --sheet-height <pt> [--module-out <file>]\n"
+        << "  imposr_cli shuffle-assistant --pages <N> [--assistant-sig-size <N>] [--module-out <file>]\n"
+        << "  imposr_cli peel-off-remove --pages <N> --sheet-width <pt> --sheet-height <pt> [--peel-all 1] [--peel-text 1] [--peel-bates 1] [--peel-page-number 1] [--peel-tape 1]\n"
+        << "  imposr_cli stick-text --pages <N> --sheet-width <pt> --sheet-height <pt> --text <str> [--anchor topleft|topcenter|topright|middleleft|middlecenter|middleright|bottomleft|bottomcenter|bottomright] [--font-size <pt>] [--opacity <0-1>]\n"
+        << "  imposr_cli stick-fields --pages <N> --sheet-width <pt> --sheet-height <pt> --variable-csv <file> --overlay-template <str>\n"
+        << "  imposr_cli stick-bates --pages <N> --sheet-width <pt> --sheet-height <pt> [--bates-prefix <str>] [--bates-start <N>] [--bates-pad <N>]\n"
+        << "  imposr_cli stick-pdf --pages <N> --sheet-width <pt> --sheet-height <pt> --source-pdf <path> [--source-pdf-page <N>]\n"
+        << "  imposr_cli stick-tape --pages <N> --sheet-width <pt> --sheet-height <pt> [--stick-rect-x <pt>] [--stick-rect-y <pt>] [--stick-rect-w <pt>] [--stick-rect-h <pt>]\n"
+        << "  imposr_cli peel-off --pages <N> --sheet-width <pt> --sheet-height <pt> [--stick-rect-x <pt>] [--stick-rect-y <pt>] [--stick-rect-w <pt>] [--stick-rect-h <pt>]\n"
+        << "  imposr_cli variable-data --pages <N> --sheet-width <pt> --sheet-height <pt> --variable-csv <file> [--overlay-template <str>]\n"
         << "  imposr_cli batch --batch-csv <jobs.csv> --output-dir <dir> [--batch-report-out <file.json>] [--batch-stop-on-error 0|1]\n"
-        << "Common options for all modes: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--acrobat-js-out <file.js>] [--sdk-ops-out <file.json>] [--composition-out <file.json>] [--pdf-out <file.pdf>] [--job-out <file.json>] [--output-dir <dir>] [--output-stem <name>] [--stamp-output 0|1] [--batch-csv <jobs.csv>] [--batch-report-out <file.json>] [--batch-stop-on-error 0|1] [--pdf-header <text>] [--pdf-footer <text>] [--pdf-sheet-number 0|1] [--pdf-bates-enable 0|1] [--pdf-bates-prefix <text>] [--pdf-bates-start N] [--pdf-trim-marks 0|1] [--pdf-trim-length <pt>] [--pdf-trim-offset <pt>] [--pdf-bleed-box 0|1] [--pdf-bleed <pt>] [--pdf-overlay-template <text>] [--pdf-variable-csv <file.csv>] [--pdfx-profile none|pdfx-1a|pdfx-4] [--preflight 0|1] [--preflight-out <file.json>] [--fail-on-preflight 0|1] [--fail-on-quality-gate 0|1] [--summary 0|1] [--validate 0|1] [--fail-on-validation 0|1] [--inspect-source-page <N>] [--inspect-sheet <N> --inspect-slot <N>]\n";
+        << "  imposr_cli preset list [--preset-dir <dir>]\n"
+        << "  imposr_cli preset apply --load-preset <file> --pages <N> --sheet-width <pt> --sheet-height <pt>\n"
+        << "  imposr_cli sequence list [--sequence-dir <dir>]\n"
+        << "  imposr_cli sequence run --sequence-file <file> [--output-dir <dir>]\n"
+        << "Common options: [--load-preset <file>] [--save-preset <file>] [--page-sequence <csv>] [--reverse 0|1] [--filter all|even|odd] [--pad-multiple N] [--signature-size N] [--creep <pt>] [--fit-to-slot 0|1] [--rotate-to-fit 0|1] [--source-page-width <pt>] [--source-page-height <pt>] [--audit-out <file.xml>] [--manifest-out <file.json>] [--pdf-out <file.pdf>] [--output-dir <dir>] [--output-stem <name>] [--pdfx-profile none|pdfx-1a|pdfx-4] [--preflight 0|1] [--fail-on-quality-gate 0|1] [--summary 0|1]\n";
 }
 
 bool ParseUInt(const std::string& value, std::uint32_t& output) {
@@ -157,6 +184,30 @@ std::string BuildUtcTimestamp() {
     std::ostringstream out;
     out << std::put_time(&utc, "%Y%m%d-%H%M%SZ");
     return out.str();
+}
+
+aimp::StickOnContext BuildStickOnContext(const aimp::ImpositionPlan& plan,
+                                         const std::string& filename = "") {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm local {};
+#if defined(_WIN32)
+    localtime_s(&local, &nowTime);
+#else
+    localtime_r(&nowTime, &local);
+#endif
+    std::ostringstream dateBuf, dtBuf;
+    dateBuf << std::put_time(&local, "%Y-%m-%d");
+    dtBuf   << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
+
+    const auto stats = aimp::ComputePlanStatistics(plan);
+    aimp::StickOnContext ctx {};
+    ctx.filename          = filename;
+    ctx.date              = dateBuf.str();
+    ctx.datetime          = dtBuf.str();
+    ctx.totalPageCount    = plan.sourcePageCount;
+    ctx.totalSheetCount   = stats.sheetCount;
+    return ctx;
 }
 
 std::string BuildDefaultOutputStem(const std::string& mode, std::uint32_t pages) {
@@ -534,6 +585,150 @@ int RunBatchMode(const std::string& cliPath,
     return failedJobs == 0 ? 0 : 5;
 }
 
+aimp::StickOnAnchor ParseAnchor(const std::string& s) {
+    if (s == "topleft")      return aimp::StickOnAnchor::TopLeft;
+    if (s == "topcenter")    return aimp::StickOnAnchor::TopCenter;
+    if (s == "topright")     return aimp::StickOnAnchor::TopRight;
+    if (s == "middleleft")   return aimp::StickOnAnchor::MiddleLeft;
+    if (s == "middlecenter") return aimp::StickOnAnchor::MiddleCenter;
+    if (s == "middleright")  return aimp::StickOnAnchor::MiddleRight;
+    if (s == "bottomleft")   return aimp::StickOnAnchor::BottomLeft;
+    if (s == "bottomcenter") return aimp::StickOnAnchor::BottomCenter;
+    if (s == "bottomright")  return aimp::StickOnAnchor::BottomRight;
+    return aimp::StickOnAnchor::BottomLeft;
+}
+
+bool ParseApplyToPages(const std::string& spec,
+                       std::uint32_t pageCount,
+                       bool& applyToAll,
+                       std::vector<std::uint32_t>& indices) {
+    if (spec.empty() || spec == "all") {
+        applyToAll = true;
+        return true;
+    }
+    applyToAll = false;
+    std::stringstream ss(spec);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        std::uint32_t idx = 0;
+        if (!ParseUInt(token, idx) || idx >= pageCount) {
+            return false;
+        }
+        indices.push_back(idx);
+    }
+    return !indices.empty();
+}
+
+int RunPresetList(const std::string& presetDir) {
+    const std::filesystem::path dir = presetDir.empty() ? "." : presetDir;
+    std::error_code ec;
+    std::ostringstream out;
+    out << "{\n  \"kind\": \"preset-list\",\n  \"directory\": \"" << EscapeJsonString(dir.string()) << "\",\n  \"presets\": [\n";
+    bool first = true;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (entry.path().extension() == ".json") {
+            if (!first) out << ",\n";
+            out << "    \"" << EscapeJsonString(entry.path().string()) << "\"";
+            first = false;
+        }
+    }
+    out << "\n  ]\n}\n";
+    std::cout << out.str();
+    return 0;
+}
+
+int RunSequenceList(const std::string& sequenceDir) {
+    const std::filesystem::path dir = sequenceDir.empty() ? "." : sequenceDir;
+    std::error_code ec;
+    std::ostringstream out;
+    out << "{\n  \"kind\": \"sequence-list\",\n  \"directory\": \"" << EscapeJsonString(dir.string()) << "\",\n  \"sequences\": [\n";
+    bool first = true;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (ec) break;
+        const auto ext = entry.path().extension();
+        if (ext == ".json" || ext == ".csv") {
+            if (!first) out << ",\n";
+            out << "    \"" << EscapeJsonString(entry.path().string()) << "\"";
+            first = false;
+        }
+    }
+    out << "\n  ]\n}\n";
+    std::cout << out.str();
+    return 0;
+}
+
+// Runs a sequence file (JSON array of arg-arrays, or one CSV row per job).
+// Format: each line is a comma-separated list of CLI arguments excluding the
+// executable name. Empty lines and lines beginning with '#' are skipped.
+int RunSequenceFile(const std::string& cliPath,
+                    const std::string& sequenceFile,
+                    const std::string& outputDir) {
+    if (sequenceFile.empty()) {
+        std::cerr << "sequence run requires --sequence-file\n";
+        return 1;
+    }
+    std::ifstream in(sequenceFile);
+    if (!in) {
+        std::cerr << "Could not open --sequence-file: " << sequenceFile << '\n';
+        return 1;
+    }
+
+    std::string executablePath = TrimAscii(cliPath);
+    if (executablePath.size() >= 2 && executablePath.front() == '"' && executablePath.back() == '"') {
+        executablePath = executablePath.substr(1, executablePath.size() - 2);
+    }
+
+    std::uint32_t total = 0, succeeded = 0, failed = 0;
+    std::vector<std::string> entries;
+    std::string line;
+    while (std::getline(in, line)) {
+        line = TrimAscii(line);
+        if (line.empty() || line[0] == '#') continue;
+        const auto fields = ParseCsvLine(line);
+        std::vector<std::string> cmdArgs = {executablePath};
+        for (const auto& f : fields) {
+            const std::string t = TrimAscii(f);
+            if (!t.empty()) cmdArgs.push_back(t);
+        }
+        if (!outputDir.empty()) {
+            cmdArgs.push_back("--output-dir");
+            cmdArgs.push_back(outputDir);
+        }
+        ++total;
+        std::string cmd;
+        const int rc = RunProcess(cmdArgs, cmd);
+        if (rc == 0) {
+            ++succeeded;
+        } else {
+            ++failed;
+            std::cerr << "Sequence step " << total << " failed (exit=" << rc << "): " << cmd << '\n';
+        }
+        std::ostringstream e;
+        e << "    {\"step\": " << total << ", \"exitCode\": " << rc << ", \"status\": \""
+          << (rc == 0 ? "ok" : "failed") << "\", \"command\": \"" << EscapeJsonString(cmd) << "\"}";
+        entries.push_back(e.str());
+    }
+
+    std::cout << BuildBatchReportJson(total, succeeded, failed, entries);
+    return failed == 0 ? 0 : 5;
+}
+
+// Write a string to a file, creating parent directories as needed.
+bool WriteFile(const std::string& path, const std::string& content) {
+    if (path.empty()) return true;
+    std::error_code ec;
+    const auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) return false;
+    }
+    std::ofstream f(path);
+    if (!f) return false;
+    f << content;
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -543,15 +738,25 @@ int main(int argc, char** argv) {
     }
 
     const std::string mode = argv[1];
+
+    // Sub-command for compound modes (preset / sequence).
+    std::string subMode;
+    if ((mode == "preset" || mode == "sequence") && argc >= 3) {
+        subMode = argv[2];
+    }
+
     std::uint32_t pages = 0;
     std::uint32_t columns = 0;
     std::uint32_t rows = 0;
     std::uint32_t repeatX = 0;
     std::uint32_t repeatY = 0;
+    double repeatRotation = 0.0;
     double sheetWidth = 0.0;
     double sheetHeight = 0.0;
     double stepX = 0.0;
     double stepY = 0.0;
+    std::string watchDir;
+    double watchIntervalSec = 2.0;
     double slotWidth = 0.0;
     double slotHeight = 0.0;
     double tileOverlap = 0.0;
@@ -588,6 +793,51 @@ int main(int argc, char** argv) {
     std::string pageSequenceCsv;
     std::vector<std::uint32_t> pageSequence;
 
+    // New module flags.
+    std::string adjustMode;
+    double scaleX = 1.0, scaleY = 1.0;
+    double targetWidth = 0.0, targetHeight = 0.0;
+    double cropRectX = 0.0, cropRectY = 0.0, cropRectW = 0.0, cropRectH = 0.0;
+    double extendTop = 0.0, extendBottom = 0.0, extendLeft = 0.0, extendRight = 0.0;
+    std::uint32_t insertAt = 0;
+    std::uint32_t insertCount = 1;
+    std::string insertDoc;
+    std::string stickText;
+    std::string stickAnchorStr;
+    double stickFontSize = 12.0;
+    double stickOpacity = 1.0;
+    double stickColorR = 0.0, stickColorG = 0.0, stickColorB = 0.0;
+    double stickRectX = 0.0, stickRectY = 0.0, stickRectW = 200.0, stickRectH = 20.0;
+    std::string stickApplyToPages;
+    std::string batesPrefix;
+    std::string batesSuffix;
+    std::uint32_t batesStart = 1;
+    std::uint32_t batesPadWidth = 4;
+    std::string sourcePdf;
+    std::uint32_t sourcePdfPage = 0;
+    double trimShiftCreep = 0.0;
+    std::string overlayTemplate;
+    std::string variableCsvPath;
+    std::string presetDir;
+    std::string sequenceDir;
+    std::string sequenceFile;
+    // Sample document options.
+    double samplePageWidth  = 595.28;
+    double samplePageHeight = 841.89;
+    bool   sampleDiagonals  = false;
+    // Shuffle assistant option.
+    std::uint32_t assistantSigSize = 4;
+    // Peel-off removal flags.
+    bool peelAll        = false;
+    bool peelText       = false;
+    bool peelBates      = false;
+    bool peelPageNumber = false;
+    bool peelPdfPage    = false;
+    bool peelTape       = false;
+    // Module-result output paths.
+    std::string moduleOutPath;
+
+    // First pass: collect --load-preset.
     for (int i = 2; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == "--load-preset") {
             loadPresetPath = argv[i + 1];
@@ -607,6 +857,7 @@ int main(int argc, char** argv) {
         rows = preset.rows;
         repeatX = preset.repeatX;
         repeatY = preset.repeatY;
+        repeatRotation = preset.repeatRotation;
         tileOverlap = preset.tileOverlap;
         stepX = preset.stepX;
         stepY = preset.stepY;
@@ -619,7 +870,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    for (int i = 2; i < argc; ++i) {
+    // Start arg index: skip subMode token for compound commands.
+    const int argStart = (mode == "preset" || mode == "sequence") ? 3 : 2;
+
+    for (int i = argStart; i < argc; ++i) {
         const std::string key = argv[i];
         if (i + 1 >= argc) {
             std::cerr << "Missing value for argument: " << key << '\n';
@@ -633,13 +887,13 @@ int main(int argc, char** argv) {
                 return 1;
             }
         } else if (key == "--sheet-width") {
-            if (!ParseDouble(value, sheetWidth)) {
-                std::cerr << "Invalid value for --sheet-width\n";
+            if (!ParseDouble(value, sheetWidth) || sheetWidth <= 0.0) {
+                std::cerr << "Invalid value for --sheet-width (must be > 0)\n";
                 return 1;
             }
         } else if (key == "--sheet-height") {
-            if (!ParseDouble(value, sheetHeight)) {
-                std::cerr << "Invalid value for --sheet-height\n";
+            if (!ParseDouble(value, sheetHeight) || sheetHeight <= 0.0) {
+                std::cerr << "Invalid value for --sheet-height (must be > 0)\n";
                 return 1;
             }
         } else if (key == "--columns") {
@@ -667,8 +921,7 @@ int main(int argc, char** argv) {
         } else if (key == "--job-out") {
             jobOutPath = value;
         } else if (key == "--load-preset") {
-            // Already handled in first pass.
-            continue;
+            continue; // already handled
         } else if (key == "--save-preset") {
             savePresetPath = value;
         } else if (key == "--pdf-out") {
@@ -838,6 +1091,18 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid value for --step-y\n";
                 return 1;
             }
+        } else if (key == "--repeat-rotation") {
+            if (!ParseDouble(value, repeatRotation)) {
+                std::cerr << "Invalid value for --repeat-rotation\n";
+                return 1;
+            }
+        } else if (key == "--watch-dir") {
+            watchDir = value;
+        } else if (key == "--watch-interval") {
+            if (!ParseDouble(value, watchIntervalSec) || watchIntervalSec <= 0.0) {
+                std::cerr << "Invalid value for --watch-interval (expected > 0)\n";
+                return 1;
+            }
         } else if (key == "--slot-width") {
             if (!ParseDouble(value, slotWidth)) {
                 std::cerr << "Invalid value for --slot-width\n";
@@ -879,6 +1144,7 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid value for --creep (expected >= 0)\n";
                 return 1;
             }
+            trimShiftCreep = buildOptions.bookletCreepPerSheetPoints;
         } else if (key == "--fit-to-slot") {
             std::uint32_t raw = 0;
             if (!ParseUInt(value, raw) || raw > 1) {
@@ -914,15 +1180,248 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid value for --filter (all|even|odd)\n";
                 return 1;
             }
+        // New module args.
+        } else if (key == "--adjust-mode") {
+            adjustMode = value;
+        } else if (key == "--scale-x") {
+            if (!ParseDouble(value, scaleX)) {
+                std::cerr << "Invalid value for --scale-x\n";
+                return 1;
+            }
+        } else if (key == "--scale-y") {
+            if (!ParseDouble(value, scaleY)) {
+                std::cerr << "Invalid value for --scale-y\n";
+                return 1;
+            }
+        } else if (key == "--target-width") {
+            if (!ParseDouble(value, targetWidth)) {
+                std::cerr << "Invalid value for --target-width\n";
+                return 1;
+            }
+        } else if (key == "--target-height") {
+            if (!ParseDouble(value, targetHeight)) {
+                std::cerr << "Invalid value for --target-height\n";
+                return 1;
+            }
+        } else if (key == "--crop-x") {
+            if (!ParseDouble(value, cropRectX)) {
+                std::cerr << "Invalid value for --crop-x\n";
+                return 1;
+            }
+        } else if (key == "--crop-y") {
+            if (!ParseDouble(value, cropRectY)) {
+                std::cerr << "Invalid value for --crop-y\n";
+                return 1;
+            }
+        } else if (key == "--crop-w") {
+            if (!ParseDouble(value, cropRectW)) {
+                std::cerr << "Invalid value for --crop-w\n";
+                return 1;
+            }
+        } else if (key == "--crop-h") {
+            if (!ParseDouble(value, cropRectH)) {
+                std::cerr << "Invalid value for --crop-h\n";
+                return 1;
+            }
+        } else if (key == "--extend-top") {
+            if (!ParseDouble(value, extendTop)) {
+                std::cerr << "Invalid value for --extend-top\n";
+                return 1;
+            }
+        } else if (key == "--extend-bottom") {
+            if (!ParseDouble(value, extendBottom)) {
+                std::cerr << "Invalid value for --extend-bottom\n";
+                return 1;
+            }
+        } else if (key == "--extend-left") {
+            if (!ParseDouble(value, extendLeft)) {
+                std::cerr << "Invalid value for --extend-left\n";
+                return 1;
+            }
+        } else if (key == "--extend-right") {
+            if (!ParseDouble(value, extendRight)) {
+                std::cerr << "Invalid value for --extend-right\n";
+                return 1;
+            }
+        } else if (key == "--insert-at") {
+            if (!ParseUInt(value, insertAt)) {
+                std::cerr << "Invalid value for --insert-at\n";
+                return 1;
+            }
+        } else if (key == "--insert-count") {
+            if (!ParseUInt(value, insertCount) || insertCount == 0) {
+                std::cerr << "Invalid value for --insert-count (must be >= 1)\n";
+                return 1;
+            }
+        } else if (key == "--insert-doc") {
+            insertDoc = value;
+        } else if (key == "--text") {
+            stickText = value;
+        } else if (key == "--anchor") {
+            stickAnchorStr = value;
+        } else if (key == "--font-size") {
+            if (!ParseDouble(value, stickFontSize) || stickFontSize <= 0.0) {
+                std::cerr << "Invalid value for --font-size\n";
+                return 1;
+            }
+        } else if (key == "--opacity") {
+            if (!ParseDouble(value, stickOpacity) || stickOpacity < 0.0 || stickOpacity > 1.0) {
+                std::cerr << "Invalid value for --opacity (expected 0.0 - 1.0)\n";
+                return 1;
+            }
+        } else if (key == "--color-r") {
+            if (!ParseDouble(value, stickColorR)) {
+                std::cerr << "Invalid value for --color-r\n";
+                return 1;
+            }
+        } else if (key == "--color-g") {
+            if (!ParseDouble(value, stickColorG)) {
+                std::cerr << "Invalid value for --color-g\n";
+                return 1;
+            }
+        } else if (key == "--color-b") {
+            if (!ParseDouble(value, stickColorB)) {
+                std::cerr << "Invalid value for --color-b\n";
+                return 1;
+            }
+        } else if (key == "--stick-rect-x") {
+            if (!ParseDouble(value, stickRectX)) {
+                std::cerr << "Invalid value for --stick-rect-x\n";
+                return 1;
+            }
+        } else if (key == "--stick-rect-y") {
+            if (!ParseDouble(value, stickRectY)) {
+                std::cerr << "Invalid value for --stick-rect-y\n";
+                return 1;
+            }
+        } else if (key == "--stick-rect-w") {
+            if (!ParseDouble(value, stickRectW) || stickRectW <= 0.0) {
+                std::cerr << "Invalid value for --stick-rect-w\n";
+                return 1;
+            }
+        } else if (key == "--stick-rect-h") {
+            if (!ParseDouble(value, stickRectH) || stickRectH <= 0.0) {
+                std::cerr << "Invalid value for --stick-rect-h\n";
+                return 1;
+            }
+        } else if (key == "--apply-to-pages") {
+            stickApplyToPages = value;
+        } else if (key == "--bates-prefix") {
+            batesPrefix = value;
+        } else if (key == "--bates-suffix") {
+            batesSuffix = value;
+        } else if (key == "--bates-start") {
+            if (!ParseUInt(value, batesStart)) {
+                std::cerr << "Invalid value for --bates-start\n";
+                return 1;
+            }
+        } else if (key == "--bates-pad") {
+            if (!ParseUInt(value, batesPadWidth)) {
+                std::cerr << "Invalid value for --bates-pad\n";
+                return 1;
+            }
+        } else if (key == "--source-pdf") {
+            sourcePdf = value;
+        } else if (key == "--source-pdf-page") {
+            if (!ParseUInt(value, sourcePdfPage)) {
+                std::cerr << "Invalid value for --source-pdf-page\n";
+                return 1;
+            }
+        } else if (key == "--overlay-template") {
+            overlayTemplate = value;
+        } else if (key == "--variable-csv") {
+            variableCsvPath = value;
+        } else if (key == "--preset-dir") {
+            presetDir = value;
+        } else if (key == "--sequence-dir") {
+            sequenceDir = value;
+        } else if (key == "--sequence-file") {
+            sequenceFile = value;
+        } else if (key == "--module-out") {
+            moduleOutPath = value;
+        } else if (key == "--sample-page-width") {
+            if (!ParseDouble(value, samplePageWidth) || samplePageWidth <= 0.0) {
+                std::cerr << "Invalid value for --sample-page-width\n";
+                return 1;
+            }
+        } else if (key == "--sample-page-height") {
+            if (!ParseDouble(value, samplePageHeight) || samplePageHeight <= 0.0) {
+                std::cerr << "Invalid value for --sample-page-height\n";
+                return 1;
+            }
+        } else if (key == "--sample-diagonals") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) {
+                std::cerr << "Invalid value for --sample-diagonals (0 or 1)\n";
+                return 1;
+            }
+            sampleDiagonals = (raw == 1);
+        } else if (key == "--assistant-sig-size") {
+            if (!ParseUInt(value, assistantSigSize) || assistantSigSize < 4) {
+                std::cerr << "Invalid value for --assistant-sig-size (min 4)\n";
+                return 1;
+            }
+        } else if (key == "--peel-all") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) { std::cerr << "Invalid --peel-all\n"; return 1; }
+            peelAll = (raw == 1);
+        } else if (key == "--peel-text") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) { std::cerr << "Invalid --peel-text\n"; return 1; }
+            peelText = (raw == 1);
+        } else if (key == "--peel-bates") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) { std::cerr << "Invalid --peel-bates\n"; return 1; }
+            peelBates = (raw == 1);
+        } else if (key == "--peel-page-number") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) { std::cerr << "Invalid --peel-page-number\n"; return 1; }
+            peelPageNumber = (raw == 1);
+        } else if (key == "--peel-pdf-page") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) { std::cerr << "Invalid --peel-pdf-page\n"; return 1; }
+            peelPdfPage = (raw == 1);
+        } else if (key == "--peel-tape") {
+            std::uint32_t raw = 0;
+            if (!ParseUInt(value, raw) || raw > 1) { std::cerr << "Invalid --peel-tape\n"; return 1; }
+            peelTape = (raw == 1);
         } else {
             std::cerr << "Unknown argument: " << key << '\n';
             return 1;
         }
     }
 
+    // ─── Compound sub-commands ────────────────────────────────────────────────
+
     if (mode == "batch") {
         return RunBatchMode(argv[0], batchCsvPath, outputDir, batchReportOutPath, batchStopOnError, failOnQualityGate);
     }
+
+    if (mode == "preset") {
+        if (subMode == "list") {
+            return RunPresetList(presetDir);
+        }
+        if (subMode == "apply") {
+            // Fall through — handled by normal plan generation below with --load-preset.
+            // Requires --pages / --sheet-width / --sheet-height from preset or flags.
+        } else if (!subMode.empty()) {
+            std::cerr << "Unknown preset sub-command: " << subMode << '\n';
+            return 1;
+        }
+    }
+
+    if (mode == "sequence") {
+        if (subMode == "list") {
+            return RunSequenceList(sequenceDir);
+        }
+        if (subMode == "run") {
+            return RunSequenceFile(argv[0], sequenceFile, outputDir);
+        }
+        std::cerr << "Unknown sequence sub-command: " << subMode << '\n';
+        return 1;
+    }
+
+    // ─── Page-sequence pre-processing ────────────────────────────────────────
 
     if (!pageSequenceCsv.empty()) {
         std::string parseError;
@@ -933,9 +1432,50 @@ int main(int argc, char** argv) {
         buildOptions.explicitPageSequence = pageSequence;
     }
 
+    // ─── Output-dir scaffolding ───────────────────────────────────────────────
+
+    if (!outputDir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(outputDir, ec);
+        if (ec) {
+            std::cerr << "Could not create --output-dir: " << outputDir << '\n';
+            return 1;
+        }
+
+        std::string resolvedStem = outputStem.empty() ? BuildDefaultOutputStem(mode, pages) : outputStem;
+        if (stampOutput) {
+            resolvedStem += "_" + BuildUtcTimestamp();
+        }
+
+        const std::filesystem::path base = std::filesystem::path(outputDir) / resolvedStem;
+        if (outPath.empty())          outPath          = base.string() + ".plan.json";
+        if (auditOutPath.empty())     auditOutPath     = base.string() + ".audit.xml";
+        if (manifestOutPath.empty())  manifestOutPath  = base.string() + ".manifest.json";
+        if (acrobatJsOutPath.empty()) acrobatJsOutPath = base.string() + ".acrobat-placement.js";
+        if (sdkOpsOutPath.empty())    sdkOpsOutPath    = base.string() + ".sdk-ops.json";
+        if (compositionOutPath.empty()) compositionOutPath = base.string() + ".production-composition.json";
+        if (pdfOutPath.empty())       pdfOutPath       = base.string() + ".proof.pdf";
+        if (preflightOutPath.empty()) preflightOutPath = base.string() + ".preflight.json";
+        if (jobOutPath.empty())       jobOutPath       = base.string() + ".job.json";
+        if (moduleOutPath.empty())    moduleOutPath    = base.string() + ".module.json";
+    }
+
+    // ─── Build the base plan ─────────────────────────────────────────────────
+
     const aimp::SheetSize sheet {sheetWidth, sheetHeight};
     aimp::ImpositionPlan plan {};
-    if (mode == "two-up") {
+
+    // Helper: build a two-up plan as the default for all new module modes.
+    const auto buildTwoUp = [&]() {
+        plan = aimp::TwoUpPlanner::Build("cli-input", pages, sheet, buildOptions);
+    };
+
+    // Helper: build booklet.
+    const auto buildBooklet = [&]() {
+        plan = aimp::BookletPlanner::Build("cli-input", pages, sheet, buildOptions);
+    };
+
+    if (mode == "two-up" || mode == "preset") {
         plan = aimp::TwoUpPlanner::Build("cli-input", pages, sheet, buildOptions);
     } else if (mode == "n-up") {
         if (columns == 0 || rows == 0) {
@@ -944,7 +1484,7 @@ int main(int argc, char** argv) {
         }
         plan = aimp::NUpPlanner::Build("cli-input", pages, sheet, columns, rows, buildOptions);
     } else if (mode == "booklet") {
-        plan = aimp::BookletPlanner::Build("cli-input", pages, sheet, buildOptions);
+        buildBooklet();
     } else if (mode == "step-repeat") {
         if (repeatX == 0 || repeatY == 0 || slotWidth <= 0.0 || slotHeight <= 0.0) {
             std::cerr << "step-repeat mode requires repeat/step/slot arguments\n";
@@ -955,7 +1495,8 @@ int main(int argc, char** argv) {
             repeatY,
             stepX,
             stepY,
-            aimp::Rect {0.0, 0.0, slotWidth, slotHeight}
+            aimp::Rect {0.0, 0.0, slotWidth, slotHeight},
+            repeatRotation
         };
         plan = aimp::StepAndRepeatPlanner::Build("cli-input", pages, sheet, config, buildOptions);
     } else if (mode == "manual") {
@@ -988,107 +1529,512 @@ int main(int argc, char** argv) {
         }
         const aimp::TileConfig config {columns, rows, tileOverlap};
         plan = aimp::TilePlanner::Build("cli-input", pages, sheet, config, buildOptions);
+
+    // ─── New module modes ─────────────────────────────────────────────────────
+
+    } else if (mode == "trim-shift") {
+        buildBooklet();
+        aimp::TrimShiftConfig cfg {};
+        cfg.creepPerSheetPoints = trimShiftCreep;
+        cfg.totalSheetsInSignature = buildOptions.bookletSignatureSize;
+        const auto result = aimp::ApplyCreepShiftToPlan(plan, cfg);
+        const std::string json = aimp::TrimShiftConfigToJson(cfg, result);
+        if (!WriteFile(moduleOutPath, json)) {
+            std::cerr << "Could not write module output: " << moduleOutPath << '\n';
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << json;
+        }
+
+    } else if (mode == "adjust-pages") {
+        buildTwoUp();
+        aimp::AdjustSpec spec {};
+        if (adjustMode.empty() || adjustMode == "scale") {
+            spec.mode = aimp::AdjustMode::Scale;
+            spec.scaleX = scaleX;
+            spec.scaleY = scaleY;
+        } else if (adjustMode == "crop") {
+            spec.mode = aimp::AdjustMode::Crop;
+            spec.cropRect = aimp::Rect {cropRectX, cropRectY, cropRectW, cropRectH};
+        } else if (adjustMode == "extend") {
+            spec.mode = aimp::AdjustMode::Extend;
+            spec.extendTop = extendTop;
+            spec.extendBottom = extendBottom;
+            spec.extendLeft = extendLeft;
+            spec.extendRight = extendRight;
+        } else if (adjustMode == "scale-to-fit") {
+            spec.mode = aimp::AdjustMode::ScaleToFit;
+            spec.targetWidth = targetWidth;
+            spec.targetHeight = targetHeight;
+        } else if (adjustMode == "scale-to-fill") {
+            spec.mode = aimp::AdjustMode::ScaleToFill;
+            spec.targetWidth = targetWidth;
+            spec.targetHeight = targetHeight;
+        } else {
+            std::cerr << "Unknown --adjust-mode: " << adjustMode << '\n';
+            return 1;
+        }
+        spec.applyToAllPlacements = true;
+        std::string adjustErr;
+        const auto result = aimp::ApplyAdjustSpec(plan, spec);
+        if (!WriteFile(moduleOutPath, aimp::AdjustResultToJson(result))) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << aimp::AdjustResultToJson(result);
+        }
+
+    } else if (mode == "insert-blank") {
+        // Build a sequence with blank pages inserted, then build two-up.
+        std::vector<std::uint32_t> seq;
+        for (std::uint32_t i = 0; i < pages; ++i) seq.push_back(i);
+        seq = aimp::InsertBlankPages(seq, insertAt, insertCount);
+        buildOptions.explicitPageSequence = seq;
+        plan = aimp::TwoUpPlanner::Build("cli-input",
+                                          static_cast<std::uint32_t>(seq.size()),
+                                          sheet, buildOptions);
+
+    } else if (mode == "insert-file") {
+        // Build a sequence; insert insertCount pages from insertDoc at insertAt.
+        std::vector<std::uint32_t> seq;
+        for (std::uint32_t i = 0; i < pages; ++i) seq.push_back(i);
+        const std::string docId = insertDoc.empty() ? "inserted-file" : insertDoc;
+        // Represent inserted pages as blank placeholders in the sequence so
+        // the plan accounts for them; the actual content comes from docId at
+        // render time (handled by the SDK plugin or PDF composer).
+        for (std::uint32_t k = 0; k < insertCount; ++k) {
+            seq.insert(seq.begin() + static_cast<std::ptrdiff_t>(insertAt + k),
+                       aimp::kBlankPageIndex);
+        }
+        buildOptions.explicitPageSequence = seq;
+        plan = aimp::TwoUpPlanner::Build("cli-input",
+                                          static_cast<std::uint32_t>(seq.size()),
+                                          sheet, buildOptions);
+        // Emit a JSON note about the inserted document.
+        std::ostringstream note;
+        note << "{\"kind\":\"insert-file\",\"insertedDoc\":\"" << EscapeJsonString(docId)
+             << "\",\"insertAt\":" << insertAt << ",\"insertCount\":" << insertCount << "}\n";
+        if (!WriteFile(moduleOutPath, note.str())) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << note.str();
+        }
+
+    } else if (mode == "insert-conditional") {
+        std::vector<std::uint32_t> result;
+        if (buildOptions.padToMultiple > 0) {
+            // Pad sequence to the nearest multiple of padToMultiple by appending blank pages.
+            for (std::uint32_t i = 0; i < pages; ++i) result.push_back(i);
+            const std::size_t target = ((result.size() + buildOptions.padToMultiple - 1)
+                                        / buildOptions.padToMultiple) * buildOptions.padToMultiple;
+            while (result.size() < target) result.push_back(aimp::kBlankPageIndex);
+        } else {
+            // Insert blank pages at the specified position when it matches the even/odd filter.
+            for (std::uint32_t i = 0; i < pages; ++i) result.push_back(i);
+            const bool insertAtEven = (buildOptions.filter != aimp::PageFilter::OddOnly);
+            std::vector<std::uint32_t> padded;
+            for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(result.size()); ++i) {
+                if ((i % 2 == 0) == insertAtEven && i == insertAt) {
+                    for (std::uint32_t k = 0; k < insertCount; ++k) {
+                        padded.push_back(aimp::kBlankPageIndex);
+                    }
+                }
+                padded.push_back(result[i]);
+            }
+            result = std::move(padded);
+        }
+        buildOptions.explicitPageSequence = result;
+        plan = aimp::TwoUpPlanner::Build("cli-input",
+                                          static_cast<std::uint32_t>(result.size()),
+                                          sheet, buildOptions);
+
+    } else if (mode == "stick-text") {
+        buildTwoUp();
+        aimp::StickOnItem item {};
+        item.type = aimp::StickOnType::Text;
+        item.text = stickText;
+        item.anchor = ParseAnchor(stickAnchorStr);
+        item.fontSize = stickFontSize;
+        item.opacity = stickOpacity;
+        item.colorR = stickColorR;
+        item.colorG = stickColorG;
+        item.colorB = stickColorB;
+        item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+        bool applyAll = true;
+        std::vector<std::uint32_t> targetPages;
+        ParseApplyToPages(stickApplyToPages, pages, applyAll, targetPages);
+        item.applyToAllPages = applyAll;
+        item.applyToPageIndices = targetPages;
+        {
+            const auto ctx = BuildStickOnContext(plan, outputStem);
+            const auto result = aimp::ResolveStickOnItems(plan, {item}, &ctx);
+            const auto content = aimp::RenderStickOnPdfContent(result.ops, 0);
+            const std::string json = aimp::StickOnResultToJson(result);
+            if (!WriteFile(moduleOutPath, json)) {
+                std::cerr << "Could not write module output\n";
+                return 1;
+            }
+            if (moduleOutPath.empty()) {
+                std::cout << json;
+            }
+        }
+
+    } else if (mode == "stick-fields") {
+        buildTwoUp();
+        if (variableCsvPath.empty()) {
+            std::cerr << "stick-fields requires --variable-csv\n";
+            return 1;
+        }
+        aimp::VariableDataSet dataset {};
+        std::string loadErr;
+        if (!aimp::LoadVariableDataSet(variableCsvPath, dataset, loadErr)) {
+            std::cerr << "Could not load --variable-csv: " << loadErr << '\n';
+            return 1;
+        }
+        // Build one text stick-on item per CSV header using overlay template.
+        std::vector<aimp::StickOnItem> items;
+        for (const auto& header : dataset.headers) {
+            aimp::StickOnItem item {};
+            item.type = aimp::StickOnType::Text;
+            item.text = overlayTemplate.empty() ? ("{{" + header + "}}") : overlayTemplate;
+            item.anchor = ParseAnchor(stickAnchorStr);
+            item.fontSize = stickFontSize;
+            item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+            item.applyToAllPages = true;
+            items.push_back(item);
+            break; // one item per plan is sufficient for the planning layer
+        }
+        const auto result = aimp::ResolveStickOnItems(plan, items);
+        const std::string json = aimp::StickOnResultToJson(result);
+        if (!WriteFile(moduleOutPath, json)) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << json;
+        }
+
+    } else if (mode == "stick-bates") {
+        buildTwoUp();
+        aimp::StickOnItem item {};
+        item.type = aimp::StickOnType::BatesNumber;
+        item.batesPrefix = batesPrefix;
+        item.batesSuffix = batesSuffix;
+        item.batesStart = batesStart;
+        item.batesPadWidth = batesPadWidth;
+        item.anchor = ParseAnchor(stickAnchorStr);
+        item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+        item.applyToAllPages = true;
+        const auto result = aimp::ResolveStickOnItems(plan, {item});
+        const std::string json = aimp::StickOnResultToJson(result);
+        if (!WriteFile(moduleOutPath, json)) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << json;
+        }
+
+    } else if (mode == "stick-pdf") {
+        buildTwoUp();
+        if (sourcePdf.empty()) {
+            std::cerr << "stick-pdf requires --source-pdf\n";
+            return 1;
+        }
+        aimp::StickOnItem item {};
+        item.type = aimp::StickOnType::PdfPage;
+        item.sourcePdfPath = sourcePdf;
+        item.sourcePdfPage = sourcePdfPage;
+        item.anchor = ParseAnchor(stickAnchorStr);
+        item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+        item.applyToAllPages = true;
+        const auto result = aimp::ResolveStickOnItems(plan, {item});
+        const std::string json = aimp::StickOnResultToJson(result);
+        if (!WriteFile(moduleOutPath, json)) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << json;
+        }
+
+    } else if (mode == "stick-tape") {
+        buildTwoUp();
+        aimp::StickOnItem item {};
+        item.type = aimp::StickOnType::MaskingTape;
+        item.anchor = ParseAnchor(stickAnchorStr);
+        item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+        item.applyToAllPages = true;
+        const auto result = aimp::ResolveStickOnItems(plan, {item});
+        const std::string json = aimp::StickOnResultToJson(result);
+        if (!WriteFile(moduleOutPath, json)) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << json;
+        }
+
+    } else if (mode == "peel-off") {
+        buildTwoUp();
+        aimp::StickOnItem item {};
+        item.type = aimp::StickOnType::PeelOff;
+        item.anchor = ParseAnchor(stickAnchorStr);
+        item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+        item.applyToAllPages = true;
+        const auto result = aimp::ResolveStickOnItems(plan, {item});
+        const std::string json = aimp::StickOnResultToJson(result);
+        if (!WriteFile(moduleOutPath, json)) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << json;
+        }
+
+    } else if (mode == "variable-data") {
+        buildTwoUp();
+        if (variableCsvPath.empty()) {
+            std::cerr << "variable-data requires --variable-csv\n";
+            return 1;
+        }
+        aimp::VariableDataSet dataset {};
+        std::string loadErr;
+        if (!aimp::LoadVariableDataSet(variableCsvPath, dataset, loadErr)) {
+            std::cerr << "Could not load --variable-csv: " << loadErr << '\n';
+            return 1;
+        }
+        const std::string tmpl = overlayTemplate.empty() ? "" : overlayTemplate;
+        const auto mergeResults = aimp::MergeVariableData(dataset, tmpl, pages);
+        const std::string datasetJson = aimp::VariableDataSetToJson(dataset);
+        std::ostringstream mergeJson;
+        mergeJson << "{\n  \"kind\": \"variable-data-merge\",\n";
+        mergeJson << "  \"dataset\": " << datasetJson << ",\n";
+        mergeJson << "  \"mergeResults\": [\n";
+        for (std::size_t i = 0; i < mergeResults.size(); ++i) {
+            const auto& r = mergeResults[i];
+            mergeJson << "    {\"pageIndex\": " << r.pageIndex
+                      << ", \"resolvedText\": \"" << EscapeJsonString(r.resolvedText) << "\"}";
+            if (i + 1 < mergeResults.size()) mergeJson << ",";
+            mergeJson << "\n";
+        }
+        mergeJson << "  ]\n}\n";
+        if (!WriteFile(moduleOutPath, mergeJson.str())) {
+            std::cerr << "Could not write module output\n";
+            return 1;
+        }
+        if (moduleOutPath.empty()) {
+            std::cout << mergeJson.str();
+        }
+
+    } else if (mode == "sample-doc") {
+        if (pdfOutPath.empty()) {
+            std::cerr << "sample-doc requires --pdf-out <file>\n";
+            return 1;
+        }
+        if (pages == 0) pages = 8;
+        aimp::SampleDocumentOptions sdOpts {};
+        sdOpts.pageCount        = pages;
+        sdOpts.pageWidthPoints  = (samplePageWidth  > 0.0) ? samplePageWidth  : sheetWidth;
+        sdOpts.pageHeightPoints = (samplePageHeight > 0.0) ? samplePageHeight : sheetHeight;
+        if (sdOpts.pageWidthPoints  <= 0.0) sdOpts.pageWidthPoints  = 595.28;
+        if (sdOpts.pageHeightPoints <= 0.0) sdOpts.pageHeightPoints = 841.89;
+        sdOpts.drawDiagonals = sampleDiagonals;
+        std::string sdErr;
+        if (!aimp::CreateSampleDocument(sdOpts, pdfOutPath, sdErr)) {
+            std::cerr << "Could not create sample document: " << sdErr << '\n';
+            return 1;
+        }
+        std::cout << "{\"kind\":\"sample-doc\",\"pages\":" << pages
+                  << ",\"path\":\"" << EscapeJsonString(pdfOutPath) << "\"}\n";
+        return 0;
+
+    } else if (mode == "imposition-info") {
+        // Build a plan from preset or two-up default, then emit imposition info.
+        if (plan.placements.empty()) {
+            buildTwoUp();
+        }
+        const auto info = aimp::BuildImpositionInfo(plan);
+        const std::string json = aimp::ImpositionInfoToJson(info);
+        if (!moduleOutPath.empty()) {
+            if (!WriteFile(moduleOutPath, json)) {
+                std::cerr << "Could not write imposition-info output\n";
+                return 1;
+            }
+        } else {
+            std::cout << json;
+        }
+        return 0;
+
+    } else if (mode == "shuffle-assistant") {
+        if (pages == 0) {
+            std::cerr << "shuffle-assistant requires --pages N\n";
+            return 1;
+        }
+        const auto result = aimp::RunShuffleAssistant(pages, assistantSigSize);
+        const std::string json = aimp::ShuffleAssistantToJson(result);
+        if (!moduleOutPath.empty()) {
+            if (!WriteFile(moduleOutPath, json)) {
+                std::cerr << "Could not write shuffle-assistant output\n";
+                return 1;
+            }
+        } else {
+            std::cout << json;
+        }
+        return 0;
+
+    } else if (mode == "peel-off-remove") {
+        // Remove previously-applied stick-on marks from a resolved ops JSON.
+        // The ops JSON is read from --module-out (as source) or passed as stdin.
+        // Here we demonstrate by building a plan, resolving all Text ops, then peeling text.
+        buildTwoUp();
+        aimp::StickOnItem item {};
+        item.type = aimp::StickOnType::Text;
+        item.text = "(applied-mark)";
+        item.applyToAllPages = true;
+        item.rect = aimp::Rect {stickRectX, stickRectY, stickRectW, stickRectH};
+        const auto resolved = aimp::ResolveStickOnItems(plan, {item});
+
+        aimp::PeelOffSpec spec {};
+        spec.removeAll         = peelAll;
+        spec.removeText        = peelText || peelAll;
+        spec.removeBatesNumber = peelBates || peelAll;
+        spec.removePageNumber  = peelPageNumber || peelAll;
+        spec.removePdfPage     = peelPdfPage || peelAll;
+        spec.removeMaskingTape = peelTape || peelAll;
+        spec.removePeelOff     = peelAll;
+
+        const auto remaining = aimp::PeelOffOps(resolved.ops, spec);
+        // Emit summary JSON.
+        std::ostringstream out;
+        out << "{\"kind\":\"peel-off-remove\""
+            << ",\"originalCount\":" << resolved.ops.size()
+            << ",\"removedCount\":"  << (resolved.ops.size() - remaining.size())
+            << ",\"remainingCount\":" << remaining.size()
+            << "}\n";
+        if (!moduleOutPath.empty()) {
+            if (!WriteFile(moduleOutPath, out.str())) {
+                std::cerr << "Could not write peel-off-remove output\n";
+                return 1;
+            }
+        } else {
+            std::cout << out.str();
+        }
+        return 0;
+
+    } else if (mode == "watch-dir") {
+        if (watchDir.empty()) {
+            std::cerr << "watch-dir mode requires --watch-dir <path>\n";
+            return 1;
+        }
+        if (pages == 0) {
+            std::cerr << "watch-dir mode requires --pages N\n";
+            return 1;
+        }
+        const std::filesystem::path watchPath(watchDir);
+        std::error_code dirEc;
+        if (!std::filesystem::is_directory(watchPath, dirEc)) {
+            std::cerr << "watch-dir: not a directory: " << watchDir << '\n';
+            return 1;
+        }
+        const int pollMs = static_cast<int>(watchIntervalSec * 1000.0);
+        std::set<std::string> seen;
+        std::cout << "Watching: " << watchDir
+                  << " (interval " << watchIntervalSec << "s, --pages " << pages << ")\n";
+        std::cout << "Press Ctrl+C to stop.\n" << std::flush;
+
+        while (true) {
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::directory_iterator(watchPath, ec)) {
+                if (!entry.is_regular_file()) continue;
+                const auto p = entry.path();
+                const auto ext = p.extension().string();
+                if (ext != ".pdf" && ext != ".PDF") continue;
+                const std::string pathStr = p.string();
+                if (seen.count(pathStr)) continue;
+                seen.insert(pathStr);
+
+                std::cout << "New file: " << pathStr << '\n' << std::flush;
+
+                // Build plan using the configured mode and the provided --pages value.
+                aimp::ImpositionPlan watchPlan;
+                const aimp::SheetSize watchSheet {sheetWidth, sheetHeight};
+                if (mode == "watch-dir") { // always true here; avoid unused-var warning
+                    if (columns > 0 && rows > 0) {
+                        watchPlan = aimp::NUpPlanner::Build("watch-input", pages,
+                                                            watchSheet, columns, rows, buildOptions);
+                    } else {
+                        watchPlan = aimp::TwoUpPlanner::Build("watch-input", pages,
+                                                              watchSheet, buildOptions);
+                    }
+                }
+                const std::string planStr = aimp::ToJson(watchPlan);
+                const auto outFile = p.parent_path() / (p.stem().string() + ".plan.json");
+                if (!WriteFile(outFile.string(), planStr)) {
+                    std::cerr << "  Could not write plan: " << outFile.string() << '\n';
+                } else {
+                    std::cout << "  Plan written: " << outFile.string() << '\n' << std::flush;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(pollMs));
+        }
+        return 0; // unreachable; loop exits via signal
+
     } else {
         std::cerr << "Unknown mode: " << mode << '\n';
         PrintUsage();
         return 1;
     }
 
-    if (!outputDir.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(outputDir, ec);
-        if (ec) {
-            std::cerr << "Could not create --output-dir: " << outputDir << '\n';
-            return 1;
-        }
+    // ─── Shared output pipeline ───────────────────────────────────────────────
 
-        std::string resolvedStem = outputStem.empty() ? BuildDefaultOutputStem(mode, pages) : outputStem;
-        if (stampOutput) {
-            resolvedStem += "_" + BuildUtcTimestamp();
-        }
-
-        const std::filesystem::path base = std::filesystem::path(outputDir) / resolvedStem;
-        if (outPath.empty()) {
-            outPath = base.string() + ".plan.json";
-        }
-        if (auditOutPath.empty()) {
-            auditOutPath = base.string() + ".audit.xml";
-        }
-        if (manifestOutPath.empty()) {
-            manifestOutPath = base.string() + ".manifest.json";
-        }
-        if (acrobatJsOutPath.empty()) {
-            acrobatJsOutPath = base.string() + ".acrobat-placement.js";
-        }
-        if (sdkOpsOutPath.empty()) {
-            sdkOpsOutPath = base.string() + ".sdk-ops.json";
-        }
-        if (compositionOutPath.empty()) {
-            compositionOutPath = base.string() + ".production-composition.json";
-        }
-        if (pdfOutPath.empty()) {
-            pdfOutPath = base.string() + ".proof.pdf";
-        }
-        if (preflightOutPath.empty()) {
-            preflightOutPath = base.string() + ".preflight.json";
-        }
-        if (jobOutPath.empty()) {
-            jobOutPath = base.string() + ".job.json";
-        }
-    }
-
-    const std::string json = aimp::ToJson(plan);
+    const std::string planJson = aimp::ToJson(plan);
     if (!outPath.empty()) {
-        std::ofstream file(outPath);
-        if (!file) {
-            std::cerr << "Could not open output file: " << outPath << '\n';
+        if (!WriteFile(outPath, planJson)) {
+            std::cerr << "Could not write plan JSON: " << outPath << '\n';
             return 1;
         }
-        file << json;
-    } else {
-        std::cout << json;
+    } else if (mode == "two-up" || mode == "n-up" || mode == "booklet" ||
+               mode == "step-repeat" || mode == "manual" || mode == "tile" ||
+               mode == "preset" ||
+               mode == "insert-blank" || mode == "insert-file" || mode == "insert-conditional") {
+        std::cout << planJson;
     }
 
     if (!auditOutPath.empty()) {
-        std::ofstream file(auditOutPath);
-        if (!file) {
-            std::cerr << "Could not open audit output file: " << auditOutPath << '\n';
+        if (!WriteFile(auditOutPath, aimp::ToAuditXml(plan))) {
+            std::cerr << "Could not write audit XML: " << auditOutPath << '\n';
             return 1;
         }
-        file << aimp::ToAuditXml(plan);
     }
 
     if (!manifestOutPath.empty()) {
-        std::ofstream file(manifestOutPath);
-        if (!file) {
-            std::cerr << "Could not open manifest output file: " << manifestOutPath << '\n';
+        if (!WriteFile(manifestOutPath, aimp::ToPlacementManifestJson(plan))) {
+            std::cerr << "Could not write manifest JSON: " << manifestOutPath << '\n';
             return 1;
         }
-        file << aimp::ToPlacementManifestJson(plan);
     }
     if (!acrobatJsOutPath.empty()) {
-        std::ofstream file(acrobatJsOutPath);
-        if (!file) {
-            std::cerr << "Could not open Acrobat JS output file: " << acrobatJsOutPath << '\n';
+        if (!WriteFile(acrobatJsOutPath, aimp::ToAcrobatPlacementJs(plan))) {
+            std::cerr << "Could not write Acrobat JS: " << acrobatJsOutPath << '\n';
             return 1;
         }
-        file << aimp::ToAcrobatPlacementJs(plan);
     }
     if (!sdkOpsOutPath.empty()) {
-        std::ofstream file(sdkOpsOutPath);
-        if (!file) {
-            std::cerr << "Could not open SDK ops output file: " << sdkOpsOutPath << '\n';
+        if (!WriteFile(sdkOpsOutPath, aimp::ToAcrobatSdkOpsJson(plan))) {
+            std::cerr << "Could not write SDK ops JSON: " << sdkOpsOutPath << '\n';
             return 1;
         }
-        file << aimp::ToAcrobatSdkOpsJson(plan);
     }
     if (!compositionOutPath.empty()) {
-        std::ofstream file(compositionOutPath);
-        if (!file) {
-            std::cerr << "Could not open production composition output file: " << compositionOutPath << '\n';
+        if (!WriteFile(compositionOutPath, aimp::ToProductionCompositionJson(plan, buildOptions, pdfOptions))) {
+            std::cerr << "Could not write production composition JSON: " << compositionOutPath << '\n';
             return 1;
         }
-        file << aimp::ToProductionCompositionJson(plan, buildOptions, pdfOptions);
     }
 
     if (!pdfOutPath.empty()) {
@@ -1107,6 +2053,7 @@ int main(int argc, char** argv) {
         preset.tileOverlap = tileOverlap;
         preset.repeatX = repeatX;
         preset.repeatY = repeatY;
+        preset.repeatRotation = repeatRotation;
         preset.stepX = stepX;
         preset.stepY = stepY;
         preset.slotWidth = slotWidth;
@@ -1158,12 +2105,10 @@ int main(int argc, char** argv) {
     }
 
     if (!preflightOutPath.empty()) {
-        std::ofstream file(preflightOutPath);
-        if (!file) {
-            std::cerr << "Could not open preflight output file: " << preflightOutPath << '\n';
+        if (!WriteFile(preflightOutPath, aimp::ToPreflightJson(preflightIssues))) {
+            std::cerr << "Could not write preflight JSON: " << preflightOutPath << '\n';
             return 1;
         }
-        file << aimp::ToPreflightJson(preflightIssues);
     }
 
     if (emitPreflight) {
@@ -1182,25 +2127,23 @@ int main(int argc, char** argv) {
     }
 
     if (!jobOutPath.empty()) {
-        std::ofstream file(jobOutPath);
-        if (!file) {
-            std::cerr << "Could not open job report output file: " << jobOutPath << '\n';
+        if (!WriteFile(jobOutPath, BuildJobReportJson(mode,
+                                                      pages,
+                                                      outPath,
+                                                      auditOutPath,
+                                                      manifestOutPath,
+                                                      acrobatJsOutPath,
+                                                      sdkOpsOutPath,
+                                                      compositionOutPath,
+                                                      pdfOutPath,
+                                                      preflightOutPath,
+                                                      plan,
+                                                      pdfOptions,
+                                                      validationIssues,
+                                                      preflightIssues))) {
+            std::cerr << "Could not write job report: " << jobOutPath << '\n';
             return 1;
         }
-        file << BuildJobReportJson(mode,
-                                   pages,
-                                   outPath,
-                                   auditOutPath,
-                                   manifestOutPath,
-                                   acrobatJsOutPath,
-                                   sdkOpsOutPath,
-                                   compositionOutPath,
-                                   pdfOutPath,
-                                   preflightOutPath,
-                                   plan,
-                                   pdfOptions,
-                                   validationIssues,
-                                   preflightIssues);
     }
 
     if (inspectSheet != aimp::kBlankPageIndex && inspectSlot != aimp::kBlankPageIndex) {

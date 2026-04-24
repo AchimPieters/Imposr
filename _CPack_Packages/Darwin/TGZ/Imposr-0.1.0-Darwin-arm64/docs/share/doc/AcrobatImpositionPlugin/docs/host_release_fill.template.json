@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "os": "Windows 11 23H2",
+      "cpu": "x64",
+      "acrobat_version": "vul-hier-versie-in",
+      "sdk_version": "vul-hier-sdk-in",
+      "bundle_path": "C:/evidence/run-001",
+      "proof_pdf_path": "C:/evidence/run-001/proof.pdf",
+      "imposed_output_path": "C:/evidence/run-001/imposed-output.pdf",
+      "preflight_json_path": "C:/evidence/run-001/preflight.json",
+      "sdk_ops_path": "C:/evidence/run-001/sdk-ops.json",
+      "control_surface_path": "C:/evidence/run-001/control-surface.json",
+      "notes": ""
+    },
+    {
+      "os": "macOS 14 Sonoma",
+      "cpu": "arm64",
+      "acrobat_version": "vul-hier-versie-in",
+      "sdk_version": "vul-hier-sdk-in",
+      "bundle_path": "/evidence/run-001",
+      "proof_pdf_path": "/evidence/run-001/proof.pdf",
+      "imposed_output_path": "/evidence/run-001/imposed-output.pdf",
+      "preflight_json_path": "/evidence/run-001/preflight.json",
+      "sdk_ops_path": "/evidence/run-001/sdk-ops.json",
+      "control_surface_path": "/evidence/run-001/control-surface.json",
+      "notes": ""
+    },
+    {
+      "os": "macOS 14 Sonoma",
+      "cpu": "x64 (Rosetta/Intel)",
+      "acrobat_version": "vul-hier-versie-in",
+      "sdk_version": "vul-hier-sdk-in",
+      "bundle_path": "/evidence/run-002",
+      "proof_pdf_path": "/evidence/run-002/proof.pdf",
+      "imposed_output_path": "/evidence/run-002/imposed-output.pdf",
+      "preflight_json_path": "/evidence/run-002/preflight.json",
+      "sdk_ops_path": "/evidence/run-002/sdk-ops.json",
+      "control_surface_path": "/evidence/run-002/control-surface.json",
+      "notes": ""
+    }
+  ]
+}

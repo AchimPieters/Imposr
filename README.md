@@ -1,190 +1,159 @@
 # Imposr
 
-Imposr is een C++ imposition-engine met een Adobe Acrobat plug-in skeleton, CLI-workflow en testbare planner-kern.
+Imposr is een Adobe Acrobat plug-in voor professionele boekopmaak (imposition). Nadat je hem hebt geïnstalleerd verschijnt er een **Imposr**-menu in Acrobat waarmee je 2-up, N-up, boekjes, stap-en-herhaal en veel meer kunt uitvoeren — zonder de terminal.
 
-> **Huidige status:** de planner, proof-composer, presets, audits en batch-flow zijn bruikbaar. De echte productiecompositie van bronpagina-content in Acrobat is nog in ontwikkeling.
+> **Huidige status:** planner, proof-composer, presets, audits en batch-flow zijn bruikbaar. De echte Acrobat-pagina-compositie (bronpagina's daadwerkelijk plaatsen op output-sheets) is nog in ontwikkeling en vereist de Adobe Acrobat SDK.
 
-Zie `COMPILE.md` voor platform-specifieke compile-instructies (Windows/macOS/Linux, inclusief plug-in buildpad).
+---
 
-## Wat dit project vandaag kan
+## Installer bouwen — stap voor stap
 
-- 2-up, N-up, booklet, step-repeat, tile en manual sequence planning.
-- Reverse/even/odd filtering, blank padding, page sequence overrides.
-- JSON plan output, XML audit output en preflight/quality-gate rapportage.
-- Proof PDF (geometrie/labels/trim/bleed visualisatie) zonder SDK afhankelijkheid.
-- Preset load/save en batch-orchestratie via CSV.
-- Acrobat plug-in menu skeleton met validate/preview/run-bundle acties.
+> **Heb je nog nooit iets gecompileerd? Begin hier.** Het script regelt alles: Homebrew, CMake, create-dmg, Pillow en de rest. Jij hoeft alleen de Acrobat SDK te downloaden.
 
-## Wat nog niet productie-klaar is
+### Wat heb je nodig?
 
-- Volledige native Acrobat page-content compositie (bronpagina's echt plaatsen op output sheets).
-- Volwaardige persistente plug-in UI/panel (huidig: menu + panel-state artefacten).
-- Volledige host-validatie matrix (Windows 11 + macOS) met ingevulde pass-evidence.
-- Definitieve packaging/signing/notarization releaseflow voor distributie.
+| Vereiste | Details |
+|---|---|
+| Mac | macOS 13 (Ventura) of nieuwer |
+| Adobe Acrobat | DC of nieuwer, geïnstalleerd in `/Applications` |
+| Adobe Acrobat SDK | Gratis download via Adobe Developer Portal (zie stap 1) |
+| Internetverbinding | Het script installeert ontbrekende tools automatisch |
 
-Zie voor detailstatus:
-- `docs/ROADMAP.md`
-- `docs/IMPLEMENTATIE_AUDIT_2026-04-17.md`
-- `docs/COMPATIBILITY_MATRIX_2026-04-18.md`
-- `docs/COMMERCIAL_DOD_MATRIX.md`
-- `docs/GAP_CLOSURE_PLAN.md`
+---
 
-## Snel starten (zonder Acrobat SDK)
+### Stap 1 — Download de Adobe Acrobat SDK
 
-### Vereisten
+1. Ga naar **[developer.adobe.com/acrobat](https://developer.adobe.com/acrobat/guides/)** en log in met je Adobe-account (gratis).
+2. Zoek naar **"Acrobat SDK"** of **"Plug-in SDK"** en download het ZIP-bestand (naam lijkt op `AcrobatSDK_DC.zip` of `Adobe Acrobat DC SDK.zip`).
+3. Pak het ZIP-bestand uit. Je krijgt een map met daarin o.a. een `API/`-submap. Zet die map neer op een logische plek, bijvoorbeeld:
+   ```
+   ~/Downloads/AcrobatSDK/
+   ~/Adobe/AcrobatSDK/
+   ~/Desktop/AcrobatSDK/
+   ```
+   Het script herkent deze mappen automatisch.
 
-- CMake 3.21+
-- C++17 compiler (GCC/Clang/MSVC)
+---
 
-### Build + tests
+### Stap 2 — Open Terminal en ga naar de projectmap
+
+```bash
+cd ~/Desktop/Imposr
+```
+
+---
+
+### Stap 3 — Voer het build-script uit
+
+**Variant A — SDK automatisch zoeken** (script zoekt zelf in je HOME en Downloads):
+
+```bash
+./scripts/build_installer_macos.sh
+```
+
+**Variant B — SDK-pad zelf opgeven** (aanbevolen als je weet waar de SDK staat):
+
+```bash
+./scripts/build_installer_macos.sh --acrobat-sdk-dir ~/Downloads/AcrobatSDK
+```
+
+Het script doet nu automatisch het volgende:
+
+1. Controleert Xcode Command Line Tools en installeert ze als ze ontbreken
+2. Installeert Homebrew als het er niet is
+3. Installeert CMake, create-dmg en Python Pillow via Homebrew/pip
+4. Compileert de Acrobat plug-in (`AcrobatImpositionPlugin.api`)
+5. Bouwt de CLI-tool
+6. Maakt de installers aan in `dist/`
+
+Het hele proces duurt de eerste keer 5–15 minuten (afhankelijk van je verbinding en machine).
+
+---
+
+### Stap 4 — Installeer de plug-in
+
+Wanneer het script klaar is zie je in `dist/`:
+
+```
+dist/
+  imposr-0.1.0.dmg                       ← installeer via dubbelklik (aanbevolen)
+  Imposr-Acrobat-Plugin-0.1.0.pkg        ← automatische installatie via macOS-installer
+  Imposr-0.1.0.pkg                        ← installeert alleen de CLI-tool
+```
+
+**Methode 1 — DMG (aanbevolen, zelfde als QI+):**
+
+```bash
+open dist/imposr-0.1.0.dmg
+```
+
+Er opent een Finder-venster met **Install Imposr**. Dubbelklik erop. Kies **Install**. De plug-in wordt automatisch in Acrobat geplaatst.
+
+**Methode 2 — pkg (volledig automatisch, geen klikken):**
+
+```bash
+sudo installer -pkg dist/Imposr-Acrobat-Plugin-0.1.0.pkg -target /
+```
+
+---
+
+### Stap 5 — Controleer in Acrobat
+
+1. Sluit Acrobat volledig af en start het opnieuw.
+2. Kijk in het **Plug-ins**-menu → je ziet **Imposr → Imposition control panel**.
+
+---
+
+### Problemen?
+
+| Fout | Oplossing |
+|---|---|
+| `"Install Imposr" kan niet worden geopend` | Rechtermuisklik → Openen → Toch openen, of: `xattr -dr com.apple.quarantine "/Volumes/Install Imposr/Install Imposr.app"` |
+| SDK niet gevonden | Geef `--acrobat-sdk-dir` mee met het exacte pad naar de uitgepakte SDK-map |
+| Acrobat niet gevonden bij installatie | Controleer of Acrobat in `/Applications` staat; kies anders **Browse** in het installatie-dialoog |
+| Plugin laadt niet in Acrobat | Controleer of je Acrobat volledig hebt afgesloten en opnieuw hebt gestart |
+
+---
+
+## Wat dit project kan
+
+- 2-up, N-up, booklet, step-repeat, tile en manual sequence planning
+- Reverse/even/odd filtering, blank padding, page sequence overrides
+- **TrimShift** — creep-correctie voor saddle-stitch boekjes
+- **VariableData** — CSV-based variable data merge met `{{key}}` templates
+- **Shuffle** — signature shuffle, even/odd split, interleave
+- **SplitMerge** — range-based plan split en merge
+- **PageTools** — duplicate, delete, move, rotate, insert blank pages
+- **StickOn** — text, Bates-nummering, paginanummer, PDF-stempel, maskeertape, peel-off
+- **PrinterMarks** — registratiemerken, snijmerken, bleedmerken, kleurenbalk, job-infostrip
+- **AdjustPages** — scale, crop, extend, scale-to-fit, scale-to-fill
+- **TilePages** — tilegrootte-berekening voor grootformaat tiling
+- **Bleed** — bleed zone generatie (mirror/scale/extend/solidcolor)
+- **PdfX** — PDF/X metadata detectie en compliance validatie (X-1a, X-3, X-4, X-5)
+- **Annotations** — annotatie verwerking (preserve/discard/flatten)
+- JSON plan output, XML audit output en preflight/quality-gate rapportage
+- Proof PDF (geometrie/labels/trim/bleed visualisatie) zonder SDK afhankelijkheid
+- Preset load/save en batch-orchestratie via CSV
+- Sequence automation (sequence run/list)
+- Acrobat plug-in menu met validate/preview/run-bundle acties
+
+---
+
+## Documentatie
+
+- [User Guide](docs/USER_GUIDE.md) — alle CLI-modes met voorbeelden
+- [CLI Reference](docs/CLI_REFERENCE.md) — compleet overzicht van alle opties
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) — module-architectuur, modules toevoegen
+- [Roadmap](docs/ROADMAP.md) — release planning
+
+---
+
+## Snel bouwen zonder Acrobat SDK (alleen CLI + tests)
 
 ```bash
 cmake -S . -B build -DAIMP_BUILD_PLUGIN=OFF
 cmake --build build -j
 ctest --test-dir build --output-on-failure
-```
-
-### Strict production-gate build (aanbevolen voor release branches)
-
-```bash
-cmake -S . -B build-strict \
-  -DAIMP_BUILD_PLUGIN=OFF \
-  -DAIMP_ENABLE_WARNINGS=ON \
-  -DAIMP_WARNINGS_AS_ERRORS=ON \
-  -DAIMP_ENABLE_SANITIZERS=ON \
-  -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-strict -j
-ctest --test-dir build-strict --output-on-failure
-```
-
-### Installers/packages compileren (Windows, macOS, Linux)
-
-Het project ondersteunt CPack packaging via `AIMP_ENABLE_PACKAGING=ON`.
-
-```bash
-cmake -S . -B build-package \
-  -DAIMP_BUILD_PLUGIN=OFF \
-  -DAIMP_BUILD_CLI=ON \
-  -DAIMP_BUILD_TESTS=OFF \
-  -DAIMP_ENABLE_PACKAGING=ON \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build build-package -j
-cpack --config build-package/CPackConfig.cmake -C Release
-python3 tools/generate_package_checksums.py --dir build-package --out build-package/SHA256SUMS.txt
-```
-
-Verwachte package-uitvoer per platform:
-- **Windows**: `ZIP` (en `NSIS` als `makensis` beschikbaar is).
-- **macOS**: `DragNDrop (.dmg)` en `TGZ`.
-- **Linux**: `TGZ` (en `DEB` als `dpkg` beschikbaar is).
-
-Packaging gebruikt componenten (`runtime`, `devel`, `docs`) zodat release-artifacts duidelijk gescheiden blijven.
-Controleer checksums met `SHA256SUMS.txt` voor distributie/uitrol.
-
-CI-builds voor installers staan in `.github/workflows/installers.yml`.
-
-## 100/100 production gate (definitie)
-
-`100/100` betekent in dit project:
-1. Alle matrix-rijen (Windows 11 x64, macOS arm64, macOS x64) hebben **host-runtime** evidence.
-2. Alle vereiste checks staan op `pass`.
-3. Artefactpaden en metadata zijn volledig ingevuld.
-
-Valideer lokaal:
-
-```bash
-python3 tools/validate_sdk_smoke.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --require-host-runtime \
-  --forbid-mock
-python3 tools/score_sdk_readiness.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --require-100 \
-  --forbid-mock
-```
-
-Één command voor end-to-end GO/NO-GO (finalize + validate + score + rapport):
-
-```bash
-python3 tools/run_host_go_no_go.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --fill docs/host_release_fill.json \
-  --report-out docs/HOST_GO_NO_GO_REPORT.md
-```
-
-Tooling-integratietest (bewijst dat complete host-evidence 100/100 kan halen):
-
-```bash
-python3 tools/test_host_gate_tooling.py
-```
-
-Maak snel een host-runtime scaffold (met timestamp) vanuit template:
-
-```bash
-python3 tools/init_host_runtime_evidence.py \
-  --timestamp-now \
-  --acrobat-version "vul-hier-versie-in" \
-  --sdk-version "vul-hier-sdk-in"
-```
-
-Markeer één platformrij direct als `pass` na een geslaagde host-run:
-
-```bash
-python3 tools/mark_host_smoke_pass.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --os "Windows 11 23H2" \
-  --cpu "x64" \
-  --acrobat-version "2026.001.xxxxx" \
-  --sdk-version "DC-2026" \
-  --bundle-path "C:/evidence/run-001" \
-  --proof-pdf-path "C:/evidence/run-001/proof.pdf" \
-  --imposed-output-path "C:/evidence/run-001/imposed-output.pdf" \
-  --preflight-json-path "C:/evidence/run-001/preflight.json" \
-  --sdk-ops-path "C:/evidence/run-001/sdk-ops.json" \
-  --control-surface-path "C:/evidence/run-001/control-surface.json"
-```
-
-Markeer alle platformrijen in één keer (bulk) via invulbestand:
-
-```bash
-cp docs/host_release_fill.template.json docs/host_release_fill.json
-# vul docs/host_release_fill.json met echte artifact-paden + versies
-python3 tools/finalize_host_release_evidence.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --input docs/host_release_fill.json
-python3 tools/validate_sdk_smoke.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --require-host-runtime \
-  --forbid-mock
-python3 tools/score_sdk_readiness.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --require-100 \
-  --forbid-mock
-```
-
-CI production gate:
-- `.github/workflows/host-runtime-gate.yml` (draait op `main` en `workflow_dispatch`).
-
-Hard endproduct GO/NO-GO gate:
-
-```bash
-python3 tools/release_endproduct_gate.py --evidence docs/sdk_smoke_evidence.json
-```
-
-Documentatie:
-- `docs/ENDPRODUCT_RELEASE_GATE.md`
-- `docs/ENDPRODUCT_RELEASE_RUNBOOK.md`
-- `docs/STAPPEN_NAAR_100_100.md`
-- `docs/COMMERCIAL_RELEASE_CHECKLIST.md`
-
-Eén command voor endproduct release-prep (gate + packaging + checksums + rapport):
-
-```bash
-python3 tools/prepare_endproduct_release.py \
-  --evidence docs/sdk_smoke_evidence.json \
-  --build-dir build-package \
-  --build-type Release \
-  --jobs 8
 ```
 
 ### CLI voorbeeld
@@ -201,117 +170,18 @@ python3 tools/prepare_endproduct_release.py \
   --fail-on-quality-gate 1
 ```
 
-Dit genereert (afhankelijk van flags) onder andere:
-- `plan.json`
-- `audit.xml`
-- `manifest.json`
-- `sdk-ops.json`
-- `production-composition.json`
-- `proof.pdf`
-- `preflight.json`
-- `job report` JSON
+---
 
-## Acrobat plug-in gebruiken (host-omgeving)
+## Wat nog niet productie-klaar is
 
-### Build met Adobe SDK (aanbevolen script)
+- Volledige native Acrobat page-content compositie (bronpagina's echt plaatsen op output sheets)
+- Volwaardige persistente plug-in UI/panel
+- Volledige host-validatie matrix (Windows 11 + macOS) met ingevulde pass-evidence
+- Definitieve code signing, notarization en release-flow
 
-Gebruik op macOS direct het helper-script (bouwt standaard **met** plugin):
+Zie voor detailstatus: `docs/ROADMAP.md`, `docs/IMPLEMENTATIE_AUDIT_2026-04-17.md`, `docs/COMPATIBILITY_MATRIX_2026-04-18.md`.
 
-```bash
-./scripts/build_installer_macos.sh --acrobat-sdk-dir "/pad/naar/AcrobatSDK"
-```
-
-Als `--acrobat-sdk-dir` niet wordt meegegeven, probeert het script automatisch SDK-mappen in je HOME te vinden (maxdepth 5, naammatch op `acrobat` + `sdk`), pakt Acrobat SDK zip-bestanden uit `~/Downloads` uit.
-
-- Default deploy-doel: `/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins`
-- Met handmatige override:
-
-```bash
-./scripts/build_installer_macos.sh \
-  --acrobat-sdk-dir "/pad/naar/AcrobatSDK" \
-  --acrobat-plugin-install-dir "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins"
-```
-
-Wil je expliciet zonder plugin bouwen, gebruik dan `--without-plugin`.
-
-Wil je hard falen als plugin-SDK ontbreekt, gebruik `--require-plugin`.
-
-
-Het build-script genereert nu ook automatisch een `.pkg`:
-
-- `build-package/Imposr-Acrobat-Plugin-0.1.0.pkg`
-
-Deze `.pkg` installeert de plugin automatisch in de gevonden Acrobat installatie (DC of nieuwe Acrobat). Gebruik dit pakket voor testgebruikers die geen handmatige stappen moeten doen.
-
-Na installatie staat ook een volledige uninstaller klaar op:
-
-- `/usr/local/imposr/bin/uninstall_acrobat_plugin_macos.sh`
-
-Deze ruimt pluginbestanden op in Acrobat én verwijdert `/usr/local/imposr` payload.
-
-Als fallback kun je nog steeds handmatig vanaf een gemounte image draaien:
-
-```bash
-./install_acrobat_plugin_macos.sh
-```
-
-Handmatige uninstall vanaf gemounte image:
-
-```bash
-./uninstall_acrobat_plugin_macos.sh
-```
-
-Alternatief (handmatige CMake flow):
-
-```bash
-cmake -S . -B build-plugin \
-  -DAIMP_BUILD_PLUGIN=ON \
-  -DACROBAT_SDK_DIR="/pad/naar/AcrobatSDK" \
-  -DAIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=ON
-cmake --build build-plugin -j
-```
-
-### Smoke-test runbook
-
-Volg stap-voor-stap:
-- `docs/SDK_SMOKE_RUNBOOK.md`
-
-Evidence + release-gates:
-- `docs/sdk_smoke_evidence.template.json`
-- `python3 tools/validate_sdk_smoke.py --evidence docs/sdk_smoke_evidence.json`
-- `python3 tools/generate_release_checklist.py --evidence docs/sdk_smoke_evidence.json --out docs/RELEASE_CHECKLIST.md`
-
-Simulated gate (CI/container zonder echte Acrobat host):
-- `python3 tools/generate_simulated_sdk_smoke_evidence.py --out docs/sdk_smoke_evidence.simulated.json --artifact-root /tmp/aimp-simulated-smoke`
-- `python3 tools/validate_sdk_smoke.py --evidence docs/sdk_smoke_evidence.simulated.json`
-- `python3 tools/generate_release_checklist.py --evidence docs/sdk_smoke_evidence.simulated.json --out docs/RELEASE_CHECKLIST.simulated.md`
-- `python3 tools/generate_sdk_matrix_report.py --evidence docs/sdk_smoke_evidence.simulated.json --out docs/SDK_SMOKE_MATRIX_REPORT.simulated.md`
-
-## Productie-readiness checklist (hoog niveau)
-
-1. **Host bring-up afgerond** op alle doelplatforms (Win11 x64, macOS arm64, macOS x64).
-2. **Compatibiliteitsmatrix gevuld** met echte Acrobat + SDK versies en evidence artefacten.
-3. **Native compositie stabiel** (planner output -> SDK placement -> imposed output PDF).
-4. **Quality gates hard afdwingbaar** in host-run (validation + preflight + runtime fail).
-5. **UX afgerond** (één persistente dialog/panel met preset lifecycle).
-6. **Release engineering** (signing/notarization/versioning/rollback + support policy).
-
-## Kan ik nu al testen met de nieuwste Adobe Acrobat op macOS?
-
-**Ja, technisch kun je host-smoke tests doen als je lokaal de juiste Acrobat SDK + toolchain hebt.**
-
-**Maar: nee, het project is nog niet “productie-klaar” voor volledige output-compositie.**
-
-Wat je nu al kunt valideren op macOS:
-- Plugin load in Acrobat.
-- Menu acties (validate/preview/run-bundle).
-- Artefactgeneratie (`plan/manifest/sdk-ops/preflight/proof/panel-state`).
-- Runtime quality gate gedrag.
-
-Wat nog ontbreekt voor echte productie-uitrol:
-- Volledige native compositie + robuuste regressietests op echte klant-PDF's.
-- Afgeronde matrix-pass op alle doelplatforms/architecturen.
-- Hardening van packaging/signing/notarization en operationele supportdocumentatie.
+---
 
 ## Licentie
 

@@ -1,4 +1,5 @@
 #include "aimp/PdfComposer.h"
+#include "EscapeUtils.h"
 
 #include <algorithm>
 #include <charconv>
@@ -14,24 +15,17 @@ namespace aimp {
 
 namespace {
 
-std::string EscapePdfText(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-    for (char ch : input) {
-        if (ch == '\\' || ch == '(' || ch == ')') {
-            out.push_back('\\');
-        }
-        out.push_back(ch);
-    }
-    return out;
-}
+using internal::EscapeJson;
+
+inline std::string EscapePdfText(const std::string& s) { return internal::EscapePdf(s); }
 
 std::size_t SheetCount(const ImpositionPlan& plan) {
+    if (plan.placements.empty()) return 0;
     std::size_t maxSheet = 0;
     for (const auto& placement : plan.placements) {
         maxSheet = std::max(maxSheet, static_cast<std::size_t>(placement.sheetIndex));
     }
-    return plan.placements.empty() ? 1 : maxSheet + 1;
+    return maxSheet + 1;
 }
 
 void StrokeRect(std::ostringstream& content, const Rect& rect) {

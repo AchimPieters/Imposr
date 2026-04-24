@@ -74,6 +74,20 @@ add_library(aimp_core STATIC
   src/PanelState.cpp
   src/PdfComposer.cpp
   src/Preset.cpp
+  src/TrimShift.cpp
+  src/VariableData.cpp
+  src/Shuffle.cpp
+  src/SplitMerge.cpp
+  src/PageTools.cpp
+  src/StickOn.cpp
+  src/PrinterMarks.cpp
+  src/AdjustPages.cpp
+  src/TilePages.cpp
+  src/Bleed.cpp
+  src/PdfX.cpp
+  src/Annotations.cpp
+  src/ImpositionInfo.cpp
+  src/SampleDocument.cpp
 )
 
 target_include_directories(aimp_core PUBLIC
@@ -140,6 +154,11 @@ if(AIMP_BUILD_TESTS)
   target_link_libraries(aimp_planner_tests PRIVATE aimp_core)
   aimp_apply_target_options(aimp_planner_tests)
   add_test(NAME aimp_planner_tests COMMAND aimp_planner_tests)
+
+  add_executable(aimp_new_modules_tests tests/NewModulesTests.cpp)
+  target_link_libraries(aimp_new_modules_tests PRIVATE aimp_core)
+  aimp_apply_target_options(aimp_new_modules_tests)
+  add_test(NAME aimp_new_modules_tests COMMAND aimp_new_modules_tests)
   find_package(Python3 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
     add_test(

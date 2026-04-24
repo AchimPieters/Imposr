@@ -1,11 +1,12 @@
 #include "aimp/ImpositionPlan.h"
+#include "EscapeUtils.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <map>
-#include <regex>
 #include <sstream>
 #include <set>
 #include <utility>
@@ -14,6 +15,8 @@
 namespace aimp {
 
 namespace {
+
+using internal::EscapeJson;
 
 bool IsInvalidSheet(const SheetSize& outputSheet) {
     return outputSheet.widthPoints <= 0.0 || outputSheet.heightPoints <= 0.0;
@@ -115,22 +118,6 @@ PlacementCtm BuildPlacementCtm(const SlotPlacement& p) {
     return ctm;
 }
 
-std::string EscapeJson(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-
-    for (char ch : input) {
-        switch (ch) {
-            case '\\': out += "\\\\"; break;
-            case '\"': out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += ch; break;
-        }
-    }
-    return out;
-}
 
 std::vector<std::uint32_t> BuildSourcePages(std::uint32_t pageCount, const BuildOptions& options) {
     std::vector<std::uint32_t> pages;
@@ -466,7 +453,7 @@ ImpositionPlan StepAndRepeatPlanner::Build(const std::string& sourceDocumentId,
                 }
                 const auto geometry = BuildPlacementGeometry(target, options);
                 placement.targetRect = geometry.rect;
-                placement.rotationDegrees = geometry.rotationDegrees;
+                placement.rotationDegrees = std::fmod(geometry.rotationDegrees + config.rotationDegrees, 360.0);
                 placement.scale = geometry.scale;
                 plan.placements.push_back(placement);
                 anyPlacementOnSheet = true;
@@ -627,8 +614,6 @@ std::string ToJson(const ImpositionPlan& plan) {
             << ", \"y\": " << p.targetRect.y
             << ", \"width\": " << p.targetRect.width
             << ", \"height\": " << p.targetRect.height << "}"
-            << ", \"rotationDegrees\": " << p.rotationDegrees
-            << ", \"scale\": " << p.scale
             << "}";
 
         if (i + 1 != plan.placements.size()) {
@@ -721,7 +706,7 @@ std::string ToAcrobatPlacementJs(const ImpositionPlan& plan) {
     out << "  for (var i = 0; i < aimpPlan.placements.length; ++i) {\n";
     out << "    var p = aimpPlan.placements[i];\n";
     out << "    adapter.ensureSheet(p.sheet, aimpPlan.sheetWidth, aimpPlan.sheetHeight);\n";
-    out << "    if (p.sourcePageIndex === 4294967295) {\n";
+    out << "    if (p.sourcePageIndex === " << kBlankPageIndex << ") {\n";
     out << "      if (typeof adapter.markBlankSlot === \"function\") {\n";
     out << "        adapter.markBlankSlot(p.sheet, p.slot);\n";
     out << "      }\n";
@@ -761,7 +746,7 @@ std::string ToAcrobatPlacementJs(const ImpositionPlan& plan) {
     out << "  for (var i = 0; i < aimpPlan.placements.length; ++i) {\n";
     out << "    var p = aimpPlan.placements[i];\n";
     out << "    ensureSheet(p.sheet);\n";
-    out << "    if (p.sourcePageIndex === 4294967295) continue;\n";
+    out << "    if (p.sourcePageIndex === " << kBlankPageIndex << ") continue;\n";
     out << "    placeSourcePage(p.sourcePageIndex, p.sheet, p.ctm, p.rotationDegrees || 0);\n";
     out << "  }\n";
     out << "  outDoc.saveAs(outputPdfPath);\n";
@@ -863,160 +848,215 @@ std::string ToAcrobatXObjectComposeJson(const ImpositionPlan& plan) {
     return out.str();
 }
 
+// ---------------------------------------------------------------------------
+// Minimal recursive-descent JSON parser used by ParseAcrobatSdkOpsJson.
+// Supports strings (with escape sequences), numbers, booleans, null,
+// arrays, and objects. No external dependencies.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct JVal {
+    enum class K { Null, Bool, Num, Str, Arr, Obj } k = K::Null;
+    bool  b   = false;
+    double n  = 0.0;
+    std::string s;
+    std::vector<JVal> a;
+    std::vector<std::pair<std::string, JVal>> o;
+
+    const JVal* get(const char* key) const {
+        if (k != K::Obj) return nullptr;
+        for (const auto& kv : o) if (kv.first == key) return &kv.second;
+        return nullptr;
+    }
+    double asNum(double def = 0.0)       const { return k == K::Num  ? n : def; }
+    bool   asBool(bool def = false)      const { return k == K::Bool ? b : def; }
+    const std::string& asStr()           const { static const std::string e; return k == K::Str ? s : e; }
+    std::uint32_t asUInt(std::uint32_t def = 0) const {
+        return k == K::Num ? static_cast<std::uint32_t>(n) : def;
+    }
+};
+
+struct JP {
+    const std::string& src;
+    std::size_t p = 0;
+
+    void ws() { while (p < src.size() && std::isspace((unsigned char)src[p])) ++p; }
+
+    bool parseStr(std::string& out) {
+        if (p >= src.size() || src[p] != '"') return false;
+        ++p;
+        out.clear();
+        while (p < src.size() && src[p] != '"') {
+            if (src[p] == '\\') {
+                if (++p >= src.size()) return false;
+                switch (src[p]) {
+                    case '"':  out += '"';  break;
+                    case '\\': out += '\\'; break;
+                    case '/':  out += '/';  break;
+                    case 'n':  out += '\n'; break;
+                    case 'r':  out += '\r'; break;
+                    case 't':  out += '\t'; break;
+                    case 'b':  out += '\b'; break;
+                    case 'f':  out += '\f'; break;
+                    case 'u':
+                        // Skip 4-hex digits; replace with '?'
+                        if (p + 4 >= src.size()) return false;
+                        p += 4;
+                        out += '?';
+                        break;
+                    default: out += src[p]; break;
+                }
+            } else {
+                out += src[p];
+            }
+            ++p;
+        }
+        if (p >= src.size()) return false;
+        ++p;
+        return true;
+    }
+
+    bool parseArr(JVal& v) {
+        if (p >= src.size() || src[p] != '[') return false;
+        ++p; ws(); v.k = JVal::K::Arr;
+        if (p < src.size() && src[p] == ']') { ++p; return true; }
+        while (true) {
+            JVal elem; ws();
+            if (!parseVal(elem)) return false;
+            v.a.push_back(std::move(elem));
+            ws();
+            if (p < src.size() && src[p] == ',') { ++p; ws(); continue; }
+            if (p < src.size() && src[p] == ']') { ++p; return true; }
+            return false;
+        }
+    }
+
+    bool parseObj(JVal& v) {
+        if (p >= src.size() || src[p] != '{') return false;
+        ++p; ws(); v.k = JVal::K::Obj;
+        if (p < src.size() && src[p] == '}') { ++p; return true; }
+        while (true) {
+            std::string key; ws();
+            if (!parseStr(key)) return false;
+            ws();
+            if (p >= src.size() || src[p] != ':') return false;
+            ++p; ws();
+            JVal val;
+            if (!parseVal(val)) return false;
+            v.o.emplace_back(std::move(key), std::move(val));
+            ws();
+            if (p < src.size() && src[p] == ',') { ++p; ws(); continue; }
+            if (p < src.size() && src[p] == '}') { ++p; return true; }
+            return false;
+        }
+    }
+
+    bool parseVal(JVal& v) {
+        ws();
+        if (p >= src.size()) return false;
+        const char c = src[p];
+        if (c == '"') { v.k = JVal::K::Str; return parseStr(v.s); }
+        if (c == '[') return parseArr(v);
+        if (c == '{') return parseObj(v);
+        if (c == 't') {
+            if (src.compare(p, 4, "true") != 0) return false;
+            v.k = JVal::K::Bool; v.b = true; p += 4; return true;
+        }
+        if (c == 'f') {
+            if (src.compare(p, 5, "false") != 0) return false;
+            v.k = JVal::K::Bool; v.b = false; p += 5; return true;
+        }
+        if (c == 'n') {
+            if (src.compare(p, 4, "null") != 0) return false;
+            v.k = JVal::K::Null; p += 4; return true;
+        }
+        if (c == '-' || std::isdigit((unsigned char)c)) {
+            char* end = nullptr;
+            v.n = std::strtod(src.c_str() + p, &end);
+            if (end == src.c_str() + p) return false;
+            v.k = JVal::K::Num;
+            p = static_cast<std::size_t>(end - src.c_str());
+            return true;
+        }
+        return false;
+    }
+
+    bool parse(JVal& v) { ws(); return parseVal(v) && (ws(), p == src.size()); }
+};
+
+} // anonymous namespace
+
 bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
                             std::vector<AcrobatSdkPlacementOp>& outOps,
                             std::string& errorMessage) {
     outOps.clear();
     errorMessage.clear();
-    const std::regex uintField("\"([A-Za-z]+)\"\\s*:\\s*(\\d+)");
-    const std::regex boolField("\"isBlank\"\\s*:\\s*(true|false)");
-    const std::regex stringField("\"documentId\"\\s*:\\s*\"([^\"]*)\"");
-    const std::regex doubleField("\"([A-Za-z]+)\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
 
-    std::vector<std::string> opRows;
-    std::size_t searchPos = 0;
-    while (true) {
-        const std::size_t opPos = sdkOpsJson.find("\"op\"", searchPos);
-        if (opPos == std::string::npos) {
-            break;
-        }
-        const std::size_t placePagePos = sdkOpsJson.find("\"place-page\"", opPos);
-        if (placePagePos == std::string::npos || placePagePos > opPos + 64) {
-            searchPos = opPos + 4;
-            continue;
-        }
-
-        std::size_t start = opPos;
-        int backDepth = 0;
-        bool foundStart = false;
-        while (start > 0) {
-            --start;
-            const char ch = sdkOpsJson[start];
-            if (ch == '}') {
-                ++backDepth;
-            } else if (ch == '{') {
-                if (backDepth == 0) {
-                    foundStart = true;
-                    break;
-                }
-                --backDepth;
-            }
-        }
-        if (!foundStart) {
-            searchPos = opPos + 4;
-            continue;
-        }
-
-        std::size_t endPos = start;
-        int forwardDepth = 0;
-        bool foundEnd = false;
-        while (endPos < sdkOpsJson.size()) {
-            const char ch = sdkOpsJson[endPos];
-            if (ch == '{') {
-                ++forwardDepth;
-            } else if (ch == '}') {
-                --forwardDepth;
-                if (forwardDepth == 0) {
-                    foundEnd = true;
-                    break;
-                }
-            }
-            ++endPos;
-        }
-        if (foundEnd && endPos < sdkOpsJson.size()) {
-            opRows.push_back(sdkOpsJson.substr(start, (endPos - start) + 1));
-            searchPos = endPos + 1;
-        } else {
-            searchPos = opPos + 4;
-        }
+    JP jp{sdkOpsJson};
+    JVal root;
+    if (!jp.parse(root) || root.k != JVal::K::Obj) {
+        errorMessage = "sdk-ops: invalid JSON";
+        return false;
     }
 
-    auto end = std::sregex_iterator();
-    for (const auto& row : opRows) {
-        AcrobatSdkPlacementOp op {};
-        std::map<std::string, std::uint32_t> uints;
-        std::map<std::string, double> doubles;
+    const JVal* ops = root.get("operations");
+    if (!ops || ops->k != JVal::K::Arr) {
+        errorMessage = "sdk-ops: missing \"operations\" array";
+        return false;
+    }
 
-        for (auto u = std::sregex_iterator(row.begin(), row.end(), uintField); u != end; ++u) {
-            const std::string key = (*u)[1].str();
-            const std::uint32_t value = static_cast<std::uint32_t>(std::stoul((*u)[2].str()));
-            uints[key] = value;
-        }
-        for (auto d = std::sregex_iterator(row.begin(), row.end(), doubleField); d != end; ++d) {
-            const std::string key = (*d)[1].str();
-            const double value = std::stod((*d)[2].str());
-            doubles[key] = value;
-        }
+    for (const JVal& item : ops->a) {
+        if (item.k != JVal::K::Obj) continue;
 
-        std::smatch boolMatch;
-        if (std::regex_search(row, boolMatch, boolField)) {
-            op.isBlank = boolMatch[1].str() == "true";
-        }
+        const JVal* opField = item.get("op");
+        if (!opField || opField->asStr() != "place-page") continue;
 
-        std::smatch docMatch;
-        if (std::regex_search(row, docMatch, stringField)) {
-            op.sourceDocumentId = docMatch[1].str();
-        }
-
-        if (uints.find("sheetIndex") == uints.end() ||
-            uints.find("slotIndex") == uints.end() ||
-            uints.find("pageIndex") == uints.end()) {
-            errorMessage = "sdk-ops parse error: missing sheetIndex/slotIndex/pageIndex.";
+        const JVal* sheetF = item.get("sheetIndex");
+        const JVal* slotF  = item.get("slotIndex");
+        if (!sheetF || !slotF) {
+            errorMessage = "sdk-ops: operation missing sheetIndex or slotIndex";
             outOps.clear();
             return false;
         }
 
-        op.sheetIndex = uints["sheetIndex"];
-        op.slotIndex = uints["slotIndex"];
-        op.sourcePageIndex = uints["pageIndex"];
-        op.isBlank = op.isBlank || op.sourcePageIndex == kBlankPageIndex;
+        AcrobatSdkPlacementOp op {};
+        op.sheetIndex = sheetF->asUInt();
+        op.slotIndex  = slotF->asUInt();
 
-        if (doubles.find("rotationDegrees") != doubles.end()) {
-            op.rotationDegrees = doubles["rotationDegrees"];
+        if (const JVal* f = item.get("isBlank"))        op.isBlank       = f->asBool();
+        if (const JVal* f = item.get("rotationDegrees")) op.rotationDegrees = f->asNum();
+        if (const JVal* f = item.get("scale"))           op.scale          = f->asNum(1.0);
+
+        if (const JVal* src = item.get("source")) {
+            if (const JVal* f = src->get("documentId"))  op.sourceDocumentId = f->asStr();
+            if (const JVal* f = src->get("pageIndex"))   op.sourcePageIndex  = f->asUInt(kBlankPageIndex);
         }
-        if (doubles.find("scale") != doubles.end()) {
-            op.scale = doubles["scale"];
+        if (const JVal* r = item.get("targetRect")) {
+            if (const JVal* f = r->get("x"))      op.targetRect.x      = f->asNum();
+            if (const JVal* f = r->get("y"))      op.targetRect.y      = f->asNum();
+            if (const JVal* f = r->get("width"))  op.targetRect.width  = f->asNum();
+            if (const JVal* f = r->get("height")) op.targetRect.height = f->asNum();
         }
-        if (doubles.find("x") != doubles.end()) {
-            op.targetRect.x = doubles["x"];
-        }
-        if (doubles.find("y") != doubles.end()) {
-            op.targetRect.y = doubles["y"];
-        }
-        if (doubles.find("width") != doubles.end()) {
-            op.targetRect.width = doubles["width"];
-        }
-        if (doubles.find("height") != doubles.end()) {
-            op.targetRect.height = doubles["height"];
-        }
-        if (doubles.find("a") != doubles.end()) {
-            op.ctmA = doubles["a"];
-        }
-        if (doubles.find("b") != doubles.end()) {
-            op.ctmB = doubles["b"];
-        }
-        if (doubles.find("c") != doubles.end()) {
-            op.ctmC = doubles["c"];
-        }
-        if (doubles.find("d") != doubles.end()) {
-            op.ctmD = doubles["d"];
-        }
-        if (doubles.find("e") != doubles.end()) {
-            op.ctmE = doubles["e"];
-        }
-        if (doubles.find("f") != doubles.end()) {
-            op.ctmF = doubles["f"];
+        if (const JVal* ctm = item.get("ctm")) {
+            if (const JVal* f = ctm->get("a")) op.ctmA = f->asNum();
+            if (const JVal* f = ctm->get("b")) op.ctmB = f->asNum();
+            if (const JVal* f = ctm->get("c")) op.ctmC = f->asNum();
+            if (const JVal* f = ctm->get("d")) op.ctmD = f->asNum();
+            if (const JVal* f = ctm->get("e")) op.ctmE = f->asNum();
+            if (const JVal* f = ctm->get("f")) op.ctmF = f->asNum();
         }
 
+        op.isBlank = op.isBlank || (op.sourcePageIndex == kBlankPageIndex);
         outOps.push_back(op);
     }
 
     if (outOps.empty()) {
-        errorMessage = "sdk-ops parse error: no place-page operations found.";
+        errorMessage = "sdk-ops: no place-page operations found";
         return false;
     }
     return true;
 }
+
 
 std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
                                                    const std::vector<AcrobatSdkPlacementOp>& ops) {
@@ -1030,19 +1070,20 @@ std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
         ctm.e = op.targetRect.x;
         ctm.f = op.targetRect.y;
         const double rot = std::fmod(op.rotationDegrees, 360.0);
-        if (rot == 90.0 || rot == -270.0) {
+        const auto rotNear = [&rot](double deg) { return std::abs(rot - deg) < 0.5; };
+        if (rotNear(90.0) || rotNear(-270.0)) {
             ctm.a = 0.0;
             ctm.b = op.targetRect.height;
             ctm.c = -op.targetRect.width;
             ctm.d = 0.0;
             ctm.e = op.targetRect.x + op.targetRect.width;
             ctm.f = op.targetRect.y;
-        } else if (rot == 180.0 || rot == -180.0) {
+        } else if (rotNear(180.0) || rotNear(-180.0)) {
             ctm.a = -op.targetRect.width;
             ctm.d = -op.targetRect.height;
             ctm.e = op.targetRect.x + op.targetRect.width;
             ctm.f = op.targetRect.y + op.targetRect.height;
-        } else if (rot == 270.0 || rot == -90.0) {
+        } else if (rotNear(270.0) || rotNear(-90.0)) {
             ctm.a = 0.0;
             ctm.b = -op.targetRect.height;
             ctm.c = op.targetRect.width;

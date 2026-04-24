@@ -17,6 +17,7 @@ struct PlannerPreset {
     std::uint32_t repeatY {0};
     double stepX {0.0};
     double stepY {0.0};
+    double repeatRotation {0.0};
     double slotWidth {0.0};
     double slotHeight {0.0};
     std::vector<std::uint32_t> manualSequence;
@@ -26,7 +27,7 @@ struct PlannerPreset {
     std::string outputStem {"acrobat-imposition-run"};
 };
 
-bool SavePreset(const PlannerPreset& preset, const std::string& path, std::string& errorMessage);
-bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& errorMessage);
+[[nodiscard]] bool SavePreset(const PlannerPreset& preset, const std::string& path, std::string& errorMessage);
+[[nodiscard]] bool LoadPreset(const std::string& path, PlannerPreset& preset, std::string& errorMessage);
 
 }
