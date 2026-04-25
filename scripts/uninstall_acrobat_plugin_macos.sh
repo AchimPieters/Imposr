@@ -33,14 +33,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+CURRENT_USER="${SUDO_USER:-$USER}"
 TARGETS=(
+  "$HOME/Library/Application Support/Adobe/Acrobat/DC/Plug-ins/AcrobatImpositionPlugin.api"
+  "/Users/$CURRENT_USER/Library/Application Support/Adobe/Acrobat/DC/Plug-ins/AcrobatImpositionPlugin.api"
+  "/Library/Application Support/Adobe/Acrobat/DC/Plug-ins/AcrobatImpositionPlugin.api"
   "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
   "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
 )
 
 for target in "${TARGETS[@]}"; do
   if [[ -f "$target" ]]; then
-    sudo rm -f "$target"
+    rm -f "$target" 2>/dev/null || sudo rm -f "$target"
     echo "[OK] Verwijderd: $target"
   fi
 done

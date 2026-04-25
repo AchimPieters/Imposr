@@ -101,6 +101,7 @@ struct StepRepeatConfig {
     double stepXPoints {0.0};
     double stepYPoints {0.0};
     Rect seedRect;
+    double rotationDegrees {0.0};
 };
 
 struct TileConfig {
@@ -183,12 +184,12 @@ std::string ToPlacementManifestJson(const ImpositionPlan& plan);
 std::string ToAcrobatPlacementJs(const ImpositionPlan& plan);
 std::string ToAcrobatSdkOpsJson(const ImpositionPlan& plan);
 std::string ToAcrobatXObjectComposeJson(const ImpositionPlan& plan);
-bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
+[[nodiscard]] bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
                             std::vector<AcrobatSdkPlacementOp>& outOps,
                             std::string& errorMessage);
-std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
+[[nodiscard]] std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
                                                    const std::vector<AcrobatSdkPlacementOp>& ops);
-bool BuildSheetComposeBuckets(const ImpositionPlan& plan,
+[[nodiscard]] bool BuildSheetComposeBuckets(const ImpositionPlan& plan,
                               const std::vector<AcrobatSdkPlacementOp>& ops,
                               std::vector<std::vector<AcrobatSdkPlacementOp>>& outBuckets,
                               std::string& errorMessage);
@@ -201,7 +202,7 @@ bool TryGetSourceForPlacement(const ImpositionPlan& plan,
                               std::uint32_t slotIndex,
                               PageRef& outSourcePage);
 PlanStatistics ComputePlanStatistics(const ImpositionPlan& plan);
-std::vector<ValidationIssue> ValidatePlan(const ImpositionPlan& plan);
+[[nodiscard]] std::vector<ValidationIssue> ValidatePlan(const ImpositionPlan& plan);
 std::string BuildHumanSummary(const ImpositionPlan& plan);
 
 } // namespace aimp

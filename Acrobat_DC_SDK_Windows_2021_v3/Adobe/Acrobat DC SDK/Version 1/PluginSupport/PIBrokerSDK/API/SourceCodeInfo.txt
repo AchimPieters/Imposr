@@ -1,0 +1,1 @@
+Source code and project files are present for sandboxed libraries are present at //Releases/CD/TrunkNext/Acrobat/Viewer/Win/sandbox_broker/API/Public/sandboxpisdk/

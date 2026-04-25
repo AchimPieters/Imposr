@@ -23,8 +23,8 @@ Imposr is een Adobe Acrobat plug-in voor professionele boekopmaak (imposition). 
 
 ### Stap 1 — Download de Adobe Acrobat SDK
 
-1. Ga naar **[developer.adobe.com/acrobat](https://developer.adobe.com/acrobat/guides/)** en log in met je Adobe-account (gratis).
-2. Zoek naar **"Acrobat SDK"** of **"Plug-in SDK"** en download het ZIP-bestand (naam lijkt op `AcrobatSDK_DC.zip` of `Adobe Acrobat DC SDK.zip`).
+1. Ga naar **[developer.adobe.com/console/servicesandapis](https://developer.adobe.com/console/servicesandapis)** en log in met je Adobe-account (gratis registratie).
+2. Kies bij **Acrobat SDK** de versie voor **Macintosh** en download het ZIP-bestand (naam lijkt op `AcrobatSDK_DC.zip`).
 3. Pak het ZIP-bestand uit. Je krijgt een map met daarin o.a. een `API/`-submap. Zet die map neer op een logische plek, bijvoorbeeld:
    ```
    ~/Downloads/AcrobatSDK/

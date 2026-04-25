@@ -39,7 +39,7 @@ struct BleedResult {
     std::uint32_t zonesGenerated {0};
 };
 
-Rect ComputeBleedBox(const Rect& trimBox, const BleedSpec& spec);
+Rect ComputeBleedBox(const Rect& trimBox, const BleedSpec& spec) noexcept;
 
 BleedResult GenerateBleedZones(const ImpositionPlan& plan, const BleedSpec& spec);
 

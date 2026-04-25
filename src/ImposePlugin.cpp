@@ -55,23 +55,26 @@ AVMenuItem gPluginPanelSheetA3MenuItem = nullptr;
 AVMenuItem gPluginPanelExportDialogPackageMenuItem = nullptr;
 AVMenuItem gPluginPanelOpenUnifiedDialogMenuItem = nullptr;
 AVMenu gPluginSubMenu = nullptr;
-ASCallback gMenuExecuteProc = nullptr;
-ASCallback gReportExecuteProc = nullptr;
-ASCallback gPresetSaveProc = nullptr;
-ASCallback gPresetPreviewProc = nullptr;
-ASCallback gPresetRunProc = nullptr;
-ASCallback gPresetValidateProc = nullptr;
-ASCallback gPresetQuickConfigProc = nullptr;
-ASCallback gPanelCycleLayoutProc = nullptr;
-ASCallback gPanelTogglePrepressProc = nullptr;
-ASCallback gPanelSetOutputTempProc = nullptr;
-ASCallback gPanelShowStateProc = nullptr;
-ASCallback gPanelApplyStateProc = nullptr;
-ASCallback gPanelToggleQualityGateProc = nullptr;
-ASCallback gPanelSheetA4Proc = nullptr;
-ASCallback gPanelSheetA3Proc = nullptr;
-ASCallback gPanelExportDialogPackageProc = nullptr;
-ASCallback gPanelOpenUnifiedDialogProc = nullptr;
+// Declared as AVExecuteProc (the actual callback type) rather than ASCallback
+// (void*) to avoid C++ hard type errors on the void* = func_ptr assignment.
+// AVMenuItemNew and AVAppRegisterForPageViewClicks both take AVExecuteProc directly.
+AVExecuteProc gMenuExecuteProc = nullptr;
+AVExecuteProc gReportExecuteProc = nullptr;
+AVExecuteProc gPresetSaveProc = nullptr;
+AVExecuteProc gPresetPreviewProc = nullptr;
+AVExecuteProc gPresetRunProc = nullptr;
+AVExecuteProc gPresetValidateProc = nullptr;
+AVExecuteProc gPresetQuickConfigProc = nullptr;
+AVExecuteProc gPanelCycleLayoutProc = nullptr;
+AVExecuteProc gPanelTogglePrepressProc = nullptr;
+AVExecuteProc gPanelSetOutputTempProc = nullptr;
+AVExecuteProc gPanelShowStateProc = nullptr;
+AVExecuteProc gPanelApplyStateProc = nullptr;
+AVExecuteProc gPanelToggleQualityGateProc = nullptr;
+AVExecuteProc gPanelSheetA4Proc = nullptr;
+AVExecuteProc gPanelSheetA3Proc = nullptr;
+AVExecuteProc gPanelExportDialogPackageProc = nullptr;
+AVExecuteProc gPanelOpenUnifiedDialogProc = nullptr;
 
 constexpr const char* kExtensionName = "AcrobatImpositionPlugin";
 constexpr const char* kPluginMenuTitle = "Acrobat Imposition Plugin";
@@ -695,18 +698,16 @@ bool RegisterMenus() {
         return false;
     }
 
-    gPluginSubMenu = AVMenuNew(kPluginMenuTitle, kExtensionName, nullptr, true);
+    // AVMenuNew(title, name, owner) — 3 args in this SDK version.
+    gPluginSubMenu = AVMenuNew(kPluginMenuTitle, kExtensionName, nullptr);
     if (gPluginSubMenu == nullptr) {
         return false;
     }
 
-    AVMenuItem submenuItem = AVMenuItemNew(kPluginMenuTitle, kExtensionName, gPluginSubMenu, false, NO_SHORTCUT, 0, nullptr, nullptr);
-    if (submenuItem == nullptr) {
-        return false;
-    }
+    // Add the submenu directly to the menubar (not via a menu item).
+    AVMenubarAddMenu(menubar, gPluginSubMenu, APPEND_MENU);
 
-    AVMenuAddMenuItem(menubar, submenuItem, APPEND_MENUITEM);
-
+    // AVMenuItemNew does NOT take an execute proc — use AVMenuItemSetExecuteProc.
     gMenuExecuteProc = ASCallbackCreateProto(AVExecuteProc, ExecuteTwoUpDemo);
     gPluginMenuItem = AVMenuItemNew(
         kMenuItemTitle,
@@ -715,9 +716,10 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gMenuExecuteProc,
+        nullptr,
         nullptr
     );
+    AVMenuItemSetExecuteProc(gPluginMenuItem, gMenuExecuteProc, nullptr);
 
     if (gPluginMenuItem == nullptr) {
         return false;
@@ -733,13 +735,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gReportExecuteProc,
+        nullptr,
         nullptr
     );
-
     if (gPluginReportMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginReportMenuItem, gReportExecuteProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginReportMenuItem, APPEND_MENUITEM);
 
     gPresetSaveProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetSave);
@@ -750,12 +752,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPresetSaveProc,
+        nullptr,
         nullptr
     );
     if (gPluginPresetSaveMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPresetSaveMenuItem, gPresetSaveProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetSaveMenuItem, APPEND_MENUITEM);
 
     gPresetPreviewProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetPreview);
@@ -766,12 +769,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPresetPreviewProc,
+        nullptr,
         nullptr
     );
     if (gPluginPresetPreviewMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPresetPreviewMenuItem, gPresetPreviewProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetPreviewMenuItem, APPEND_MENUITEM);
 
     gPresetRunProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetRunBundle);
@@ -782,12 +786,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPresetRunProc,
+        nullptr,
         nullptr
     );
     if (gPluginPresetRunMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPresetRunMenuItem, gPresetRunProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetRunMenuItem, APPEND_MENUITEM);
 
     gPresetValidateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetValidate);
@@ -798,12 +803,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPresetValidateProc,
+        nullptr,
         nullptr
     );
     if (gPluginPresetValidateMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPresetValidateMenuItem, gPresetValidateProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetValidateMenuItem, APPEND_MENUITEM);
 
     gPresetQuickConfigProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetQuickConfigure);
@@ -814,12 +820,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPresetQuickConfigProc,
+        nullptr,
         nullptr
     );
     if (gPluginPresetQuickConfigMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPresetQuickConfigMenuItem, gPresetQuickConfigProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetQuickConfigMenuItem, APPEND_MENUITEM);
 
     gPanelCycleLayoutProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelCycleLayout);
@@ -830,12 +837,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelCycleLayoutProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelCycleLayoutMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelCycleLayoutMenuItem, gPanelCycleLayoutProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelCycleLayoutMenuItem, APPEND_MENUITEM);
 
     gPanelTogglePrepressProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelTogglePrepress);
@@ -846,12 +854,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelTogglePrepressProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelTogglePrepressMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelTogglePrepressMenuItem, gPanelTogglePrepressProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelTogglePrepressMenuItem, APPEND_MENUITEM);
 
     gPanelSetOutputTempProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelSetOutputTemp);
@@ -862,12 +871,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelSetOutputTempProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelSetOutputTempMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelSetOutputTempMenuItem, gPanelSetOutputTempProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelSetOutputTempMenuItem, APPEND_MENUITEM);
 
     gPanelShowStateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelShowState);
@@ -878,12 +888,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelShowStateProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelShowStateMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelShowStateMenuItem, gPanelShowStateProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelShowStateMenuItem, APPEND_MENUITEM);
 
     gPanelApplyStateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelApplyState);
@@ -894,12 +905,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelApplyStateProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelApplyStateMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelApplyStateMenuItem, gPanelApplyStateProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelApplyStateMenuItem, APPEND_MENUITEM);
 
     gPanelToggleQualityGateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelToggleQualityGate);
@@ -910,12 +922,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelToggleQualityGateProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelToggleQualityGateMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelToggleQualityGateMenuItem, gPanelToggleQualityGateProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelToggleQualityGateMenuItem, APPEND_MENUITEM);
 
     gPanelSheetA4Proc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelSheetA4);
@@ -926,12 +939,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelSheetA4Proc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelSheetA4MenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelSheetA4MenuItem, gPanelSheetA4Proc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelSheetA4MenuItem, APPEND_MENUITEM);
 
     gPanelSheetA3Proc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelSheetA3);
@@ -942,12 +956,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelSheetA3Proc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelSheetA3MenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelSheetA3MenuItem, gPanelSheetA3Proc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelSheetA3MenuItem, APPEND_MENUITEM);
 
     gPanelExportDialogPackageProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelExportDialogPackage);
@@ -958,12 +973,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelExportDialogPackageProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelExportDialogPackageMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelExportDialogPackageMenuItem, gPanelExportDialogPackageProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelExportDialogPackageMenuItem, APPEND_MENUITEM);
 
     gPanelOpenUnifiedDialogProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelOpenUnifiedDialog);
@@ -974,12 +990,13 @@ bool RegisterMenus() {
         true,
         NO_SHORTCUT,
         0,
-        gPanelOpenUnifiedDialogProc,
+        nullptr,
         nullptr
     );
     if (gPluginPanelOpenUnifiedDialogMenuItem == nullptr) {
         return false;
     }
+    AVMenuItemSetExecuteProc(gPluginPanelOpenUnifiedDialogMenuItem, gPanelOpenUnifiedDialogProc, nullptr);
     AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelOpenUnifiedDialogMenuItem, APPEND_MENUITEM);
 
     return true;
@@ -990,13 +1007,13 @@ ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData) {
         AVDoc activeDoc = AVAppGetActiveDoc();
         if (activeDoc == nullptr) {
             ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
         if (pdDoc == nullptr) {
             ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
@@ -1023,7 +1040,7 @@ ACCB1 void ACCB2 ExecutePresetSave(void* clientData) {
         const std::string presetPath = GetPresetPath();
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon preset niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog("Preset opgeslagen:\n" + presetPath);
     HANDLER
@@ -1036,12 +1053,12 @@ ACCB1 void ACCB2 ExecutePresetPreview(void* clientData) {
         AVDoc activeDoc = AVAppGetActiveDoc();
         if (activeDoc == nullptr) {
             ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
         if (pdDoc == nullptr) {
             ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         aimp::PlannerPreset preset {};
@@ -1055,20 +1072,20 @@ ACCB1 void ACCB2 ExecutePresetPreview(void* clientData) {
         std::string modeLabel;
         if (!BuildPlanFromPreset(preset, static_cast<std::uint32_t>(pageCount), plan, modeLabel)) {
             ShowInfoDialog("Kon geen plan opbouwen uit preset.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         std::error_code fsError;
         const auto tempDir = std::filesystem::temp_directory_path(fsError);
         if (fsError) {
             ShowInfoDialog("Kan temp map niet bepalen.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         const auto previewPath = (tempDir / ("acrobat-imposition-preview-" + BuildUtcTimestamp() + ".pdf")).string();
         if (!aimp::ComposePlanPdf(plan, previewPath, preset.pdfOptions, error)) {
             ShowInfoDialog("Kon preview PDF niet maken: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         ShowInfoDialog("Preview gemaakt (" + modeLabel + "):\n" + previewPath);
@@ -1082,12 +1099,12 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         AVDoc activeDoc = AVAppGetActiveDoc();
         if (activeDoc == nullptr) {
             ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
         if (pdDoc == nullptr) {
             ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         aimp::PlannerPreset preset {};
@@ -1101,7 +1118,7 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         std::string modeLabel;
         if (!BuildPlanFromPreset(preset, static_cast<std::uint32_t>(pageCount), plan, modeLabel)) {
             ShowInfoDialog("Kon geen plan opbouwen uit preset.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         const auto validationIssues = aimp::ValidatePlan(plan);
         if (preset.pdfOptions.failOnValidationIssues && !validationIssues.empty()) {
@@ -1111,14 +1128,14 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
                 message << "- " << issue.code << ": " << issue.message << '\n';
             }
             ShowInfoDialog(message.str());
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         std::error_code fsError;
         const auto tempDir = std::filesystem::temp_directory_path(fsError);
         if (fsError) {
             ShowInfoDialog("Kan temp map niet bepalen.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         const std::string stamp = BuildUtcTimestamp();
         std::filesystem::path outputRoot = tempDir;
@@ -1132,7 +1149,7 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         std::filesystem::create_directories(base, fsError);
         if (fsError) {
             ShowInfoDialog("Kan output map niet maken.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         const auto planPath = (base / "plan.json").string();
@@ -1195,7 +1212,7 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         }
         if (!aimp::ComposePlanPdf(plan, proofPath, preset.pdfOptions, error)) {
             ShowInfoDialog("Kon proof PDF niet maken: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         {
             const auto preflight = aimp::ValidatePrepressReadiness(plan, preset.pdfOptions);
@@ -1212,7 +1229,7 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
                     message << "- " << (issue.isError ? "ERROR " : "WARN ") << issue.code << ": " << issue.message << '\n';
                 }
                 ShowInfoDialog(message.str());
-                E_RETURN_VOID;
+                E_RTRN_VOID;
             }
             std::ofstream out(preflightPath);
             out << aimp::ToPreflightJson(preflight);
@@ -1237,10 +1254,13 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
                            globalPanelStatePath);
         }
 
-        AVDoc proofDoc = AVDocOpenFromFile(proofPath.c_str(), "Acrobat Imposition Proof");
+        ASFileSys defFS1 = ASGetDefaultFileSys();
+        ASPathName proofASPath = ASFileSysCreatePathName(defFS1, ASAtomFromString("Cstring"), proofPath.c_str(), nullptr);
+        AVDoc proofDoc = AVDocOpenFromFile(proofASPath, defFS1, nullptr);
+        ASFileSysReleasePath(defFS1, proofASPath);
         if (proofDoc == nullptr) {
             ShowInfoDialog("Bundle gemaakt, maar proof PDF kon niet automatisch worden geopend.\n" + proofPath);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         std::string sdkComposeError;
@@ -1271,7 +1291,10 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
                 }
             }
 #endif
-            AVDoc imposedDoc = AVDocOpenFromFile(imposedOutputPath.c_str(), "Acrobat Imposition Output");
+            ASFileSys defFS2 = ASGetDefaultFileSys();
+            ASPathName imposedASPath = ASFileSysCreatePathName(defFS2, ASAtomFromString("Cstring"), imposedOutputPath.c_str(), nullptr);
+            AVDoc imposedDoc = AVDocOpenFromFile(imposedASPath, defFS2, nullptr);
+            ASFileSysReleasePath(defFS2, imposedASPath);
             if (imposedDoc == nullptr) {
                 ShowInfoDialog("Native output gemaakt, maar kon imposed-output niet automatisch openen:\n" + imposedOutputPath);
             }
@@ -1307,7 +1330,7 @@ ACCB1 void ACCB2 ExecutePresetQuickConfigure(void* clientData) {
 
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon quick config niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         std::ostringstream message;
@@ -1346,7 +1369,7 @@ ACCB1 void ACCB2 ExecutePanelCycleLayout(void* clientData) {
 
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon panel layout niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         std::ostringstream message;
         message << "Panel layout aangepast.\n";
@@ -1374,7 +1397,7 @@ ACCB1 void ACCB2 ExecutePanelTogglePrepress(void* clientData) {
 
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon panel prepress toggle niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog(std::string("Panel prepress: ") + (enabled ? "AAN (trim+bleed)." : "UIT (trim+bleed)."));
     HANDLER
@@ -1394,7 +1417,7 @@ ACCB1 void ACCB2 ExecutePanelSetOutputTemp(void* clientData) {
         const auto tempDir = std::filesystem::temp_directory_path(fsError);
         if (fsError) {
             ShowInfoDialog("Kan temp map niet bepalen.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         preset.outputDirectory = tempDir.string();
         if (preset.outputStem.empty()) {
@@ -1403,7 +1426,7 @@ ACCB1 void ACCB2 ExecutePanelSetOutputTemp(void* clientData) {
 
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon panel output-pad niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog("Panel output locatie gezet op temp map:\n" + preset.outputDirectory);
     HANDLER
@@ -1417,7 +1440,7 @@ ACCB1 void ACCB2 ExecutePanelShowState(void* clientData) {
         std::ifstream in(path);
         if (!in) {
             ShowInfoDialog("Nog geen panel-state snapshot gevonden.\nRun eerst Validate of Run bundle.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         std::ostringstream content;
         content << in.rdbuf();
@@ -1433,7 +1456,7 @@ ACCB1 void ACCB2 ExecutePanelApplyState(void* clientData) {
         std::ifstream in(panelStatePath);
         if (!in) {
             ShowInfoDialog("Geen panel-state bestand gevonden.\nRun eerst Validate/Run of bewerk panel-state handmatig.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         std::ostringstream buffer;
         buffer << in.rdbuf();
@@ -1449,12 +1472,12 @@ ACCB1 void ACCB2 ExecutePanelApplyState(void* clientData) {
         aimp::PanelStateApplyResult applyResult {};
         if (!aimp::ApplyPanelStateJsonToPreset(json, preset, applyResult)) {
             ShowInfoDialog("Panel-state kon niet worden toegepast: JSON mist verplichte sheet/preset secties.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon panel-state niet toepassen op preset: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         std::ostringstream msg;
         msg << "Panel-state toegepast op preset:\n" << presetPath;
@@ -1483,7 +1506,7 @@ ACCB1 void ACCB2 ExecutePanelToggleQualityGate(void* clientData) {
         preset.pdfOptions.failOnPreflightErrors = enabled;
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon quality gate toggle niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog(std::string("Panel quality gate: ") + (enabled ? "AAN." : "UIT."));
     HANDLER
@@ -1502,7 +1525,7 @@ ACCB1 void ACCB2 ExecutePanelSheetA4(void* clientData) {
         preset.sheetSize = {595.276, 841.89};
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon A4 sheet preset niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog("Panel sheet ingesteld op A4 portrait (595.276 x 841.89 pt).");
     HANDLER
@@ -1521,7 +1544,7 @@ ACCB1 void ACCB2 ExecutePanelSheetA3(void* clientData) {
         preset.sheetSize = {841.89, 1190.55};
         if (!aimp::SavePreset(preset, presetPath, error)) {
             ShowInfoDialog("Kon A3 sheet preset niet opslaan: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog("Panel sheet ingesteld op A3 portrait (841.89 x 1190.55 pt).");
     HANDLER
@@ -1556,7 +1579,7 @@ ACCB1 void ACCB2 ExecutePanelExportDialogPackage(void* clientData) {
         std::ofstream out(schemaPath);
         if (!out) {
             ShowInfoDialog("Kon panel dialog schema niet schrijven.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         out << BuildPanelDialogSchemaJson();
         ShowInfoDialog("Panel dialog package geëxporteerd:\nState: " + panelStatePath + "\nSchema: " + schemaPath);
@@ -1593,7 +1616,7 @@ ACCB1 void ACCB2 ExecutePanelOpenUnifiedDialog(void* clientData) {
         std::ifstream panelStateIn(panelStatePath);
         if (!panelStateIn) {
             ShowInfoDialog("Kon panel state JSON niet openen.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         std::stringstream panelStateBuffer;
         panelStateBuffer << panelStateIn.rdbuf();
@@ -1602,7 +1625,7 @@ ACCB1 void ACCB2 ExecutePanelOpenUnifiedDialog(void* clientData) {
             std::ofstream schemaOut(schemaPath);
             if (!schemaOut) {
                 ShowInfoDialog("Kon panel schema niet schrijven.");
-                E_RETURN_VOID;
+                E_RTRN_VOID;
             }
             schemaOut << schemaJson;
         }
@@ -1610,14 +1633,17 @@ ACCB1 void ACCB2 ExecutePanelOpenUnifiedDialog(void* clientData) {
             std::ofstream htmlOut(htmlPath);
             if (!htmlOut) {
                 ShowInfoDialog("Kon panel dialog HTML niet schrijven.");
-                E_RETURN_VOID;
+                E_RTRN_VOID;
             }
             htmlOut << BuildPanelDialogHtml(panelStatePath, schemaPath, panelStateJson, schemaJson);
         }
-        AVDoc dialogDoc = AVDocOpenFromFile(htmlPath.c_str(), "Acrobat Imposition Dialog");
+        ASFileSys defFS3 = ASGetDefaultFileSys();
+        ASPathName htmlASPath = ASFileSysCreatePathName(defFS3, ASAtomFromString("Cstring"), htmlPath.c_str(), nullptr);
+        AVDoc dialogDoc = AVDocOpenFromFile(htmlASPath, defFS3, nullptr);
+        ASFileSysReleasePath(defFS3, htmlASPath);
         if (dialogDoc == nullptr) {
             ShowInfoDialog("Unified dialog package gegenereerd:\n" + htmlPath + "\n(Open dit bestand handmatig als Acrobat het niet automatisch opent.)");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         ShowInfoDialog("Unified dialog geopend:\n" + htmlPath);
     HANDLER
@@ -1630,12 +1656,12 @@ ACCB1 void ACCB2 ExecutePresetValidate(void* clientData) {
         AVDoc activeDoc = AVAppGetActiveDoc();
         if (activeDoc == nullptr) {
             ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
         if (pdDoc == nullptr) {
             ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         aimp::PlannerPreset preset {};
@@ -1649,7 +1675,7 @@ ACCB1 void ACCB2 ExecutePresetValidate(void* clientData) {
         std::string modeLabel;
         if (!BuildPlanFromPreset(preset, static_cast<std::uint32_t>(pageCount), plan, modeLabel)) {
             ShowInfoDialog("Kon geen plan opbouwen uit preset.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         const auto validationIssues = aimp::ValidatePlan(plan);
@@ -1693,13 +1719,13 @@ ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData) {
         AVDoc activeDoc = AVAppGetActiveDoc();
         if (activeDoc == nullptr) {
             ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
         if (pdDoc == nullptr) {
             ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
@@ -1710,13 +1736,13 @@ ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData) {
         const auto tempDir = std::filesystem::temp_directory_path(fsError);
         if (fsError) {
             ShowInfoDialog("Kan temp map niet bepalen voor report PDF.");
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
         const auto reportPath = (tempDir / "acrobat-imposition-two-up-report.pdf").string();
         std::string error;
         if (!aimp::ComposePlanPdf(plan, reportPath, error)) {
             ShowInfoDialog("Kon geen report PDF maken: " + error);
-            E_RETURN_VOID;
+            E_RTRN_VOID;
         }
 
         ShowInfoDialog("2-Up report PDF opgeslagen:\n" + reportPath);
@@ -1817,4 +1843,21 @@ extern "C" ACCB1 ASBool ACCB2 PluginUnload(void) {
 
 extern "C" ACCB1 const char* ACCB2 GetExtensionName(void) {
     return kExtensionName;
+}
+
+extern "C" ACCB1 ASBool ACCB2 PIHandshake(ASUns32 handshakeVersion, void *handshakeData) {
+    if (handshakeVersion == HANDSHAKE_V0200) {
+        PIHandshakeData_V0200 *hsData = (PIHandshakeData_V0200 *)handshakeData;
+        hsData->extensionName = ASAtomFromString(GetExtensionName());
+        hsData->exportHFTsCallback =
+            (void*)ASCallbackCreateProto(PIExportHFTsProcType, &PluginExportHFTs);
+        hsData->importReplaceAndRegisterCallback =
+            (void*)ASCallbackCreateProto(PIImportReplaceAndRegisterProcType, &PluginImportReplaceAndRegister);
+        hsData->initCallback =
+            (void*)ASCallbackCreateProto(PIInitProcType, &PluginInit);
+        hsData->unloadCallback =
+            (void*)ASCallbackCreateProto(PIUnloadProcType, &PluginUnload);
+        return true;
+    }
+    return false;
 }

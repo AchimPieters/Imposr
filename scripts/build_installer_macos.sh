@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 BUILD_DIR="build-package"
 BUILD_TYPE="Release"
 WITH_PLUGIN="true"
@@ -32,25 +35,90 @@ detect_acrobat_plugin_install_dir() {
     return
   fi
 
-  local candidates=(
-    "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins"
-    "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins"
+  # Prefer external plugin directories (outside the app bundle) so we don't
+  # break Acrobat's bundle code signature. Acrobat DC loads from these paths
+  # without requiring the bundle seal to be intact.
+  local external_candidates=(
+    "$HOME/Library/Application Support/Adobe/Acrobat/DC/Plug-ins"
+    "/Library/Application Support/Adobe/Acrobat/DC/Plug-ins"
   )
-
-  local candidate
-  local app_bundle
-  for candidate in "${candidates[@]}"; do
-    app_bundle="${candidate%/Contents/Plug-ins}"
-    if [[ -d "$app_bundle" ]]; then
+  for candidate in "${external_candidates[@]}"; do
+    if [[ -d "$candidate" ]]; then
       ACROBAT_PLUGIN_INSTALL_DIR="$candidate"
+      echo "[OK] Externe plugin-map gevonden: $candidate"
       return
     fi
   done
 
-  ACROBAT_PLUGIN_INSTALL_DIR="${candidates[0]}"
+  # Fall back: check if Acrobat is installed and create the user-level external dir.
+  local app_candidates=(
+    "/Applications/Adobe Acrobat DC/Adobe Acrobat.app"
+    "/Applications/Adobe Acrobat/Adobe Acrobat.app"
+  )
+  for app in "${app_candidates[@]}"; do
+    if [[ -d "$app" ]]; then
+      local ext_dir="$HOME/Library/Application Support/Adobe/Acrobat/DC/Plug-ins"
+      mkdir -p "$ext_dir"
+      ACROBAT_PLUGIN_INSTALL_DIR="$ext_dir"
+      echo "[OK] Externe plugin-map aangemaakt: $ext_dir"
+      return
+    fi
+  done
+
+  ACROBAT_PLUGIN_INSTALL_DIR="$HOME/Library/Application Support/Adobe/Acrobat/DC/Plug-ins"
+}
+
+sdk_has_required_files() {
+  # Actual SDK layout: PluginSupport/Headers/SDK/PIHeaders.h
+  #                    PluginSupport/Headers/API/PIMain.c
+  local dir="$1"
+  [[ -f "$dir/PluginSupport/Headers/SDK/PIHeaders.h" && \
+     -f "$dir/PluginSupport/Headers/API/PIMain.c" ]]
+}
+
+extract_acrobat_sdk_from_dmg() {
+  # Mount an Acrobat SDK .dmg and copy its contents to $HOME/Adobe/AcrobatSDK.
+  local dmg="$1"
+  local target="${ACROBAT_SDK_DIR_VALUE:-$HOME/Adobe/AcrobatSDK}"
+  echo "[INFO] SDK DMG gevonden: $dmg"
+  echo "[INFO] Uitpakken naar: $target"
+
+  # Detach any leftover volume with the same name first.
+  local vol_name
+  vol_name="$(hdiutil imageinfo "$dmg" 2>/dev/null | grep 'Volume Name' | awk -F': ' '{print $2}' | tr -d '\n')" || true
+
+  local mount_out
+  mount_out="$(hdiutil attach "$dmg" -nobrowse -readonly 2>&1)"
+  local mount_point
+  mount_point="$(echo "$mount_out" | grep '/Volumes/' | awk -F'\t' '{print $NF}' | tr -d '\n')"
+
+  if [[ -z "$mount_point" ]]; then
+    echo "[WARN] Kon SDK DMG niet mounten: $dmg"
+    return
+  fi
+  echo "[INFO] DMG gemount op: $mount_point"
+
+  mkdir -p "$target"
+  # rsync preserves structure; fall back to cp -rf when rsync unavailable.
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --exclude='.DS_Store' "$mount_point/" "$target/"
+  else
+    cp -rf "$mount_point/." "$target/"
+  fi
+
+  hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+
+  if sdk_has_required_files "$target"; then
+    ACROBAT_SDK_DIR_VALUE="$target"
+    echo "[OK] SDK uitgepakt naar: $target"
+  else
+    echo "[WARN] SDK gekopieerd maar PIHeaders.h niet gevonden op verwachte locatie."
+    echo "       Controleer: $target/PluginSupport/Headers/SDK/PIHeaders.h"
+  fi
 }
 
 auto_extract_acrobat_sdk_archive() {
+  # Handle .zip archives in Downloads
   local archives=()
   while IFS= read -r archive; do
     archives+=("$archive")
@@ -60,7 +128,7 @@ auto_extract_acrobat_sdk_archive() {
     return
   fi
 
-  local extract_root="$HOME/Adobe/AcrobatSDK-auto"
+  local extract_root="$HOME/Adobe/AcrobatSDK"
   mkdir -p "$extract_root"
 
   local archive
@@ -69,14 +137,15 @@ auto_extract_acrobat_sdk_archive() {
     unzip -qo "$archive" -d "$extract_root" || true
   done
 
+  # Locate the root that contains the actual plugin headers.
   local candidate
   while IFS= read -r candidate; do
-    if [[ -d "$candidate/API" ]]; then
+    if sdk_has_required_files "$candidate"; then
       ACROBAT_SDK_DIR_VALUE="$candidate"
       echo "[OK] Acrobat SDK automatisch gevonden na extract: $candidate"
       return
     fi
-  done < <(find "$extract_root" -maxdepth 6 -type d \( -iname "*acrobat*sdk*" -o -iname "*adobe*acrobat*sdk*" -o -iname "*sdk*" \) 2>/dev/null)
+  done < <(find "$extract_root" -maxdepth 6 -type d 2>/dev/null)
 }
 
 auto_detect_acrobat_sdk_dir() {
@@ -84,30 +153,41 @@ auto_detect_acrobat_sdk_dir() {
     return
   fi
 
+  # 1. Check fixed well-known directories.
   local candidates=(
     "$HOME/Adobe/AcrobatSDK"
     "$HOME/Downloads/AcrobatSDK"
     "$HOME/Documents/AcrobatSDK"
     "$HOME/Desktop/AcrobatSDK"
-    "/Applications/Adobe Acrobat SDK"
     "/opt/acrobat-sdk"
   )
 
   local candidate
   for candidate in "${candidates[@]}"; do
-    if [[ -d "$candidate" && -d "$candidate/API" ]]; then
+    if sdk_has_required_files "$candidate"; then
       ACROBAT_SDK_DIR_VALUE="$candidate"
+      echo "[OK] Acrobat SDK gevonden: $candidate"
       return
     fi
   done
 
+  # 2. Look for any matching directory anywhere in HOME.
   while IFS= read -r candidate; do
-    if [[ -d "$candidate/API" ]]; then
+    if sdk_has_required_files "$candidate"; then
       ACROBAT_SDK_DIR_VALUE="$candidate"
+      echo "[OK] Acrobat SDK gevonden: $candidate"
       return
     fi
-  done < <(find "$HOME" -maxdepth 5 -type d \( -iname "*acrobat*sdk*" -o -iname "*adobe*acrobat*sdk*" \) 2>/dev/null)
+  done < <(find "$HOME" -maxdepth 7 -type d \( -iname "*acrobat*sdk*" -o -iname "*adobe*acrobat*sdk*" \) 2>/dev/null)
 
+  # 3. SDK DMG in the repository root (Acrobat_DC_SDK_Mac_*.dmg).
+  local dmg
+  while IFS= read -r dmg; do
+    extract_acrobat_sdk_from_dmg "$dmg"
+    [[ -n "$ACROBAT_SDK_DIR_VALUE" ]] && return
+  done < <(find "$REPO_ROOT" -maxdepth 1 -type f -iname "Acrobat_DC_SDK_Mac*.dmg" 2>/dev/null)
+
+  # 4. ZIP archives in Downloads.
   auto_extract_acrobat_sdk_archive
 }
 
@@ -203,27 +283,36 @@ create_auto_plugin_pkg() {
 set -euo pipefail
 
 PLUGIN_SRC="/usr/local/imposr/lib/AcrobatImpositionPlugin.api"
-TARGETS=(
-  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
-  "/Applications/Adobe Acrobat/Adobe Acrobat.app/Contents/Plug-ins/AcrobatImpositionPlugin.api"
-)
 
 if [[ ! -f "$PLUGIN_SRC" ]]; then
   echo "[ERROR] Plugin source missing: $PLUGIN_SRC" >&2
   exit 1
 fi
 
+# Install into the EXTERNAL plugin directory so Acrobat's app-bundle
+# code signature stays intact. Acrobat DC loads plugins from both
+# ~/Library and /Library paths without breaking its own bundle seal.
+ACROBAT_APPS=(
+  "/Applications/Adobe Acrobat DC/Adobe Acrobat.app"
+  "/Applications/Adobe Acrobat/Adobe Acrobat.app"
+)
+
 installed="false"
-for target in "${TARGETS[@]}"; do
-  plugin_dir="$(dirname "$target")"
-  app_bundle="${plugin_dir%/Contents/Plug-ins}"
-  if [[ -d "$app_bundle" ]]; then
-    mkdir -p "$plugin_dir"
-    cp -f "$PLUGIN_SRC" "$target"
-    xattr -dr com.apple.quarantine "$target" || true
-    codesign --force --sign - "$target" || true
-    echo "[OK] Plugin deployed to: $target"
+for app in "${ACROBAT_APPS[@]}"; do
+  if [[ -d "$app" ]]; then
+    # Determine the installing user's home directory.
+    INSTALL_USER="${USER:-$(id -un)}"
+    if [[ "$INSTALL_USER" == "root" ]]; then
+      TARGET_DIR="/Library/Application Support/Adobe/Acrobat/DC/Plug-ins"
+    else
+      TARGET_DIR="/Users/$INSTALL_USER/Library/Application Support/Adobe/Acrobat/DC/Plug-ins"
+    fi
+    mkdir -p "$TARGET_DIR"
+    cp -f "$PLUGIN_SRC" "$TARGET_DIR/AcrobatImpositionPlugin.api"
+    xattr -dr com.apple.quarantine "$TARGET_DIR/AcrobatImpositionPlugin.api" || true
+    echo "[OK] Plugin installed to: $TARGET_DIR/AcrobatImpositionPlugin.api"
     installed="true"
+    break
   fi
 done
 
@@ -405,10 +494,17 @@ if [[ "$WITH_PLUGIN" == "true" ]]; then
     exit 1
   fi
 
-  sudo mkdir -p "$ACROBAT_PLUGIN_INSTALL_DIR"
-  sudo cp -f "$PLUGIN_SRC" "$PLUGIN_DST"
-  sudo xattr -dr com.apple.quarantine "$PLUGIN_DST" || true
-  sudo codesign --force --sign - "$PLUGIN_DST" || true
+  # Use sudo only when installing to a system-wide path; prefer the user-level
+  # external directory so the Acrobat app-bundle seal stays intact.
+  if [[ "$ACROBAT_PLUGIN_INSTALL_DIR" == /Library/* ]]; then
+    sudo mkdir -p "$ACROBAT_PLUGIN_INSTALL_DIR"
+    sudo cp -f "$PLUGIN_SRC" "$PLUGIN_DST"
+    sudo xattr -dr com.apple.quarantine "$PLUGIN_DST" || true
+  else
+    mkdir -p "$ACROBAT_PLUGIN_INSTALL_DIR"
+    cp -f "$PLUGIN_SRC" "$PLUGIN_DST"
+    xattr -dr com.apple.quarantine "$PLUGIN_DST" || true
+  fi
   echo "[OK] Plugin gedeployed naar: $PLUGIN_DST"
 
   create_auto_plugin_pkg "$PLUGIN_SRC"

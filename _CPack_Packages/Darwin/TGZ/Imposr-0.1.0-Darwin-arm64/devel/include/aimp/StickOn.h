@@ -73,12 +73,44 @@ struct StickOnResult {
     std::uint32_t opsGenerated {0};
 };
 
+// Optional context passed to ResolveStickOnItems for expanding built-in template variables.
+// Variables supported in StickOnItem::text: {{filename}}, {{date}}, {{datetime}},
+// {{pagecount}}, {{sheetcount}}.
+struct StickOnContext {
+    std::string filename;
+    std::string date;
+    std::string datetime;
+    std::uint32_t totalPageCount {0};
+    std::uint32_t totalSheetCount {0};
+};
+
 StickOnResult ResolveStickOnItems(const ImpositionPlan& plan,
-                                   const std::vector<StickOnItem>& items);
+                                   const std::vector<StickOnItem>& items,
+                                   const StickOnContext* context = nullptr);
 
 std::string StickOnResultToJson(const StickOnResult& result);
 
 std::string RenderStickOnPdfContent(const std::vector<ResolvedStickOnOp>& ops,
                                      std::uint32_t sheetIndex);
+
+// ── Peel-off / mark removal ───────────────────────────────────────────────────
+
+// Identifies which previously-applied ops to remove.
+struct PeelOffSpec {
+    bool removeAll         {false};   // if true, all other fields are ignored
+    bool removeText        {false};
+    bool removeBatesNumber {false};
+    bool removePageNumber  {false};
+    bool removePdfPage     {false};
+    bool removeMaskingTape {false};
+    bool removePeelOff     {false};
+    // When set, only remove ops on this sheet (ignored if removeAll is true and sheetIndex == kNoSheetFilter).
+    static constexpr std::uint32_t kNoSheetFilter = 0xFFFFFFFFu;
+    std::uint32_t sheetIndex {kNoSheetFilter};
+};
+
+// Returns a copy of ops with matching entries removed according to spec.
+std::vector<ResolvedStickOnOp> PeelOffOps(const std::vector<ResolvedStickOnOp>& ops,
+                                           const PeelOffSpec& spec);
 
 } // namespace aimp

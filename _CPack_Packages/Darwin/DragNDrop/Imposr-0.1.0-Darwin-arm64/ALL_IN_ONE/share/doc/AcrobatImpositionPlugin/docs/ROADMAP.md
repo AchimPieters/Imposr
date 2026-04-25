@@ -24,6 +24,20 @@
 - XML audit export
 - source-to-placement and placement-to-source inspector helpers
 
+### Quite Imposing Plus parity modules (2026-04-24)
+- **TrimShift** — creep correction with per-sheet inward/outward offset tables
+- **VariableData** — RFC-4180 CSV parser, `{{key}}` template expansion, auto image-field detection
+- **Shuffle** — signature shuffle, perfect-bound, even/odd split, interleave
+- **SplitMerge** — range-spec split (`1-4,5-8`), plan merge with sheet offset accumulation
+- **PageTools** — duplicate, delete, move, rotate, insert blank pages in sequence
+- **StickOn** — text, Bates numbering, page number, PDF page stamp, masking tape, peel-off
+- **PrinterMarks** — registration circles + crosshair, crop marks, bleed marks, 8-swatch color bar, job info strip
+- **AdjustPages** — scale, crop, extend, scale-to-fit, scale-to-fill
+- **TilePages** — tile grid geometry computation (columns × rows with overlap)
+- **Bleed** — bleed zone generation (mirror/scale/extend/solid-color) with PDF content stream output
+- **PdfX** — PDF/X metadata detection, subtype parsing (X-1a/X-3/X-4/X-5), compliance validation
+- **Annotations** — annotation processing rules with filter chain (preserve/discard/flatten)
+
 ### CLI / prototype
 - build plans from the command line
 - load and save presets

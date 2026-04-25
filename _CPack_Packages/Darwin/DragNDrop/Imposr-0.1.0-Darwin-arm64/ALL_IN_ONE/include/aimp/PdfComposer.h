@@ -52,8 +52,8 @@ std::string ToProductionCompositionJson(const ImpositionPlan& plan,
                                         const BuildOptions& buildOptions,
                                         const PdfComposeOptions& options);
 
-bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, std::string& errorMessage);
-bool ComposePlanPdf(const ImpositionPlan& plan,
+[[nodiscard]] bool ComposePlanPdf(const ImpositionPlan& plan, const std::string& outputPath, std::string& errorMessage);
+[[nodiscard]] bool ComposePlanPdf(const ImpositionPlan& plan,
                     const std::string& outputPath,
                     const PdfComposeOptions& options,
                     std::string& errorMessage);

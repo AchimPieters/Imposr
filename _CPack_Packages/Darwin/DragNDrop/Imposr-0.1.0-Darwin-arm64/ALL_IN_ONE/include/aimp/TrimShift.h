@@ -38,7 +38,7 @@ struct TrimShiftResult {
 
 double ComputeCreepOffset(std::uint32_t sheetFromOutside,
                           std::uint32_t totalSheetsInSignature,
-                          double creepPerSheetPoints);
+                          double creepPerSheetPoints) noexcept;
 
 TrimShiftResult ApplyCreepShiftToPlan(ImpositionPlan& plan, const TrimShiftConfig& config);
 
