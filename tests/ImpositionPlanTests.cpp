@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -191,6 +192,75 @@ int main() {
         if (badIssues.empty()) {
             return Fail("Invalid SDK ops slot topology should be detected by validation.");
         }
+        bool sawMissingSlotIssue = false;
+        for (const auto& issue : badIssues) {
+            if (issue.code == "sdk-ops-missing-slot") {
+                sawMissingSlotIssue = true;
+                break;
+            }
+        }
+        if (!sawMissingSlotIssue) {
+            return Fail("SDK ops validation should report missing planner slot coverage.");
+        }
+        {
+            const std::string invalidSlotJson = R"JSON(
+{
+  "operations": [
+    {"op":"place-page","sheetIndex":0.5,"slotIndex":0,"source":{"documentId":"doc","pageIndex":0}}
+  ]
+}
+)JSON";
+            parsedOps.clear();
+            if (aimp::ParseAcrobatSdkOpsJson(invalidSlotJson, parsedOps, parseError) ||
+                parseError.find("sheetIndex/slotIndex") == std::string::npos ||
+                parseError.find("op#1") == std::string::npos) {
+                return Fail("SDK ops parser should reject fractional sheet/slot indices.");
+            }
+        }
+        {
+            const std::string invalidSourceJson = R"JSON(
+{
+  "operations": [
+    {"op":"place-page","sheetIndex":0,"slotIndex":0,"source":{"documentId":"doc","pageIndex":-1}}
+  ]
+}
+)JSON";
+            parsedOps.clear();
+            if (aimp::ParseAcrobatSdkOpsJson(invalidSourceJson, parsedOps, parseError) ||
+                parseError.find("source.pageIndex") == std::string::npos) {
+                return Fail("SDK ops parser should reject negative source.pageIndex values.");
+            }
+        }
+        {
+            const std::string missingTargetRectJson = R"JSON(
+{
+  "operations": [
+    {"op":"place-page","sheetIndex":0,"slotIndex":0,"source":{"documentId":"doc","pageIndex":0},"ctm":{"a":1,"b":0,"c":0,"d":1,"e":0,"f":0}}
+  ]
+}
+)JSON";
+            parsedOps.clear();
+            if (aimp::ParseAcrobatSdkOpsJson(missingTargetRectJson, parsedOps, parseError) ||
+                parseError.find("targetRect") == std::string::npos) {
+                return Fail("SDK ops parser should require targetRect object with numeric fields.");
+            }
+        }
+        {
+            const std::string invalidCtmJson = R"JSON(
+{
+  "operations": [
+    {"op":"place-page","sheetIndex":0,"slotIndex":0,"source":{"documentId":"doc","pageIndex":0},
+     "targetRect":{"x":0,"y":0,"width":100,"height":100},
+     "ctm":{"a":"bad","b":0,"c":0,"d":1,"e":0,"f":0}}
+  ]
+}
+)JSON";
+            parsedOps.clear();
+            if (aimp::ParseAcrobatSdkOpsJson(invalidCtmJson, parsedOps, parseError) ||
+                parseError.find("ctm fields") == std::string::npos) {
+                return Fail("SDK ops parser should require finite numeric CTM fields.");
+            }
+        }
         parsedOps = {};
         if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
             return Fail("SDK ops parser should still parse for CTM parity validation test.");
@@ -209,6 +279,122 @@ int main() {
         if (!sawCtmParityIssue) {
             return Fail("SDK ops validation should detect CTM parity mismatches.");
         }
+        parsedOps = {};
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
+            return Fail("SDK ops parser should parse for unsupported rotation validation test.");
+        }
+        parsedOps[0].rotationDegrees = 45.0;
+        const auto unsupportedRotationIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        bool sawUnsupportedRotationIssue = false;
+        for (const auto& issue : unsupportedRotationIssues) {
+            if (issue.code == "sdk-ops-unsupported-rotation") {
+                sawUnsupportedRotationIssue = true;
+                break;
+            }
+        }
+        if (!sawUnsupportedRotationIssue) {
+            return Fail("SDK ops validation should flag unsupported non-quarter-turn rotations.");
+        }
+        parsedOps = {};
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
+            return Fail("SDK ops parser should parse for missing source document validation test.");
+        }
+        parsedOps[0].sourceDocumentId.clear();
+        const auto missingSourceDocIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        bool sawMissingSourceDocIssue = false;
+        for (const auto& issue : missingSourceDocIssues) {
+            if (issue.code == "sdk-ops-missing-source-document") {
+                sawMissingSourceDocIssue = true;
+                break;
+            }
+        }
+        if (!sawMissingSourceDocIssue) {
+            return Fail("SDK ops validation should require source.documentId for non-blank placements.");
+        }
+        parsedOps = {};
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
+            return Fail("SDK ops parser should parse for invalid scale validation test.");
+        }
+        parsedOps[0].scale = 0.0;
+        const auto invalidScaleIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        bool sawInvalidScaleIssue = false;
+        bool sawInvalidScaleSlotContext = false;
+        for (const auto& issue : invalidScaleIssues) {
+            if (issue.code == "sdk-ops-invalid-scale") {
+                sawInvalidScaleIssue = true;
+                if (issue.message.find("[sheet=") != std::string::npos &&
+                    issue.message.find("slot=") != std::string::npos) {
+                    sawInvalidScaleSlotContext = true;
+                }
+                break;
+            }
+        }
+        if (!sawInvalidScaleIssue) {
+            return Fail("SDK ops validation should reject non-positive scale values.");
+        }
+        if (!sawInvalidScaleSlotContext) {
+            return Fail("SDK ops validation issues should include sheet/slot context.");
+        }
+        parsedOps = {};
+        const auto twoUpForDedup = aimp::TwoUpPlanner::Build("doc", 2, {1000.0, 700.0});
+        const auto twoUpForDedupOpsJson = aimp::ToAcrobatSdkOpsJson(twoUpForDedup);
+        if (!aimp::ParseAcrobatSdkOpsJson(twoUpForDedupOpsJson, parsedOps, parseError) || parsedOps.size() < 2) {
+            return Fail("SDK ops parser should parse two-up JSON for dedupe validation test.");
+        }
+        parsedOps[0].scale = 0.0;
+        parsedOps[1].scale = 0.0;
+        const auto dedupIssues = aimp::ValidateAcrobatSdkOps(twoUpForDedup, parsedOps);
+        std::size_t invalidScaleIssueCount = 0;
+        for (const auto& issue : dedupIssues) {
+            if (issue.code == "sdk-ops-invalid-scale") {
+                ++invalidScaleIssueCount;
+            }
+        }
+        if (invalidScaleIssueCount != 1) {
+            return Fail("SDK ops validation should dedupe repeated issue codes/messages.");
+        }
+        parsedOps = {};
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
+            return Fail("SDK ops parser should parse for non-finite numeric validation tests.");
+        }
+        parsedOps[0].ctmA = std::numeric_limits<double>::quiet_NaN();
+        const auto invalidCtmNumericIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        bool sawInvalidCtmNumericIssue = false;
+        for (const auto& issue : invalidCtmNumericIssues) {
+            if (issue.code == "sdk-ops-invalid-ctm-numeric") {
+                sawInvalidCtmNumericIssue = true;
+                break;
+            }
+        }
+        if (!sawInvalidCtmNumericIssue) {
+            return Fail("SDK ops validation should reject non-finite CTM values.");
+        }
+        parsedOps = {};
+        if (!aimp::ParseAcrobatSdkOpsJson(sdkOps, parsedOps, parseError) || parsedOps.empty()) {
+            return Fail("SDK ops parser should parse for non-finite rotation validation test.");
+        }
+        parsedOps[0].rotationDegrees = std::numeric_limits<double>::infinity();
+        const auto invalidRotationValueIssues = aimp::ValidateAcrobatSdkOps(
+            aimp::TwoUpPlanner::Build("doc", 1, {600.0, 800.0}, options),
+            parsedOps);
+        bool sawInvalidRotationValueIssue = false;
+        for (const auto& issue : invalidRotationValueIssues) {
+            if (issue.code == "sdk-ops-invalid-rotation-value") {
+                sawInvalidRotationValueIssue = true;
+                break;
+            }
+        }
+        if (!sawInvalidRotationValueIssue) {
+            return Fail("SDK ops validation should reject non-finite rotation values.");
+        }
         const auto twoUpPlan = aimp::TwoUpPlanner::Build("doc", 4, {1000.0, 700.0});
         const auto twoUpOpsJson = aimp::ToAcrobatSdkOpsJson(twoUpPlan);
         std::vector<aimp::AcrobatSdkPlacementOp> twoUpOps;
@@ -221,6 +407,20 @@ int main() {
         }
         if (buckets.size() != 2 || buckets[0].size() != 2 || buckets[1].size() != 2) {
             return Fail("BuildSheetComposeBuckets should group ops per sheet with deterministic slot cardinality.");
+        }
+        auto invalidBucketsOps = twoUpOps;
+        invalidBucketsOps[0].sheetIndex = 99;
+        if (aimp::BuildSheetComposeBuckets(twoUpPlan, invalidBucketsOps, buckets, parseError) ||
+            parseError.find("sdk-ops-unexpected-slot") == std::string::npos) {
+            return Fail("BuildSheetComposeBuckets should expose first validation issue code in error message.");
+        }
+        invalidBucketsOps = twoUpOps;
+        invalidBucketsOps[0].sheetIndex = 99;
+        invalidBucketsOps[0].scale = 0.0;
+        if (aimp::BuildSheetComposeBuckets(twoUpPlan, invalidBucketsOps, buckets, parseError) ||
+            parseError.find("sdk-ops-unexpected-slot") == std::string::npos ||
+            parseError.find("sdk-ops-invalid-scale") == std::string::npos) {
+            return Fail("BuildSheetComposeBuckets should expose multiple unique validation issue codes.");
         }
 
         aimp::PdfComposeOptions pdfOptions {};

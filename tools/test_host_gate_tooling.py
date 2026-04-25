@@ -18,6 +18,10 @@ def run(cmd: list[str], cwd: Path) -> None:
         raise SystemExit(f"Command failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stdout}")
 
 
+def run_capture(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="aimp-host-gate-") as tmp:
         tmp_path = Path(tmp)
@@ -28,6 +32,23 @@ def main() -> int:
 
         evidence = json.loads((REPO_ROOT / "docs" / "sdk_smoke_evidence.json").read_text(encoding="utf-8"))
         evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+
+        # Baseline evidence ships with simulated/mock rows and should be blocked in strict mode.
+        strict_score = run_capture(
+            [
+                "python3",
+                "tools/score_sdk_readiness.py",
+                "--evidence",
+                str(evidence_path),
+                "--forbid-mock",
+                "--require-100",
+            ],
+            REPO_ROOT,
+        )
+        if strict_score.returncode == 0:
+            raise SystemExit(
+                "Expected strict mock-forbidden score gate to fail on baseline evidence, but it passed."
+            )
 
         # Create per-platform bundle artifacts so --verify-files can be enabled.
         rows = [
@@ -76,6 +97,23 @@ def main() -> int:
             ],
             REPO_ROOT,
         )
+
+        strict_score_after_fill = run_capture(
+            [
+                "python3",
+                "tools/score_sdk_readiness.py",
+                "--evidence",
+                str(evidence_path),
+                "--forbid-mock",
+                "--require-100",
+            ],
+            REPO_ROOT,
+        )
+        if strict_score_after_fill.returncode != 0:
+            raise SystemExit(
+                "Expected strict mock-forbidden score gate to pass after host fill evidence.\n"
+                f"{strict_score_after_fill.stdout}"
+            )
 
         report = report_path.read_text(encoding="utf-8")
         if "**GO**" not in report:

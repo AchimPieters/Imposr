@@ -1,6 +1,7 @@
 #include "aimp/PageTools.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 namespace aimp {

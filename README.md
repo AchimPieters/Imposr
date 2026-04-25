@@ -87,13 +87,52 @@ dist/
 open dist/imposr-0.1.0.dmg
 ```
 
-Er opent een Finder-venster met **Install Imposr**. Dubbelklik erop. Kies **Install**. De plug-in wordt automatisch in Acrobat geplaatst.
+Er opent een Finder-venster met **Install Imposr**. Dubbelklik erop. De installer biedt nu drie opties:
+
+- **Install a Imposr plug-in** — installeert de plug-in in de gekozen Acrobat-installatie.
+- **Uninstall a Imposr plug-in** — verwijdert een bestaande installatie.
+- **Open an Acrobat plug-in folder in the Finder** — opent direct de plug-inmap voor handmatige controle.
+
+Kies **Install** en klik **Continue**. In de volgende stap kun je Acrobat desnoods via **Browse…** handmatig kiezen.
 
 **Methode 2 — pkg (volledig automatisch, geen klikken):**
 
 ```bash
 sudo installer -pkg dist/Imposr-Acrobat-Plugin-0.1.0.pkg -target /
 ```
+
+**Terminal alternatief (zelfde drie acties als GUI-installer):**
+
+```bash
+# Installeren
+./scripts/install_acrobat_plugin_macos.sh --action install
+
+# Deïnstalleren
+./scripts/install_acrobat_plugin_macos.sh --action uninstall
+
+# Plug-in map openen in Finder
+./scripts/install_acrobat_plugin_macos.sh --action open-folder
+
+# Richt expliciet op een andere Acrobat.app
+./scripts/install_acrobat_plugin_macos.sh --action install --acrobat-app "/Applications/Adobe Acrobat/Adobe Acrobat.app"
+
+# Alleen tonen wat er zou gebeuren (geen wijzigingen)
+./scripts/install_acrobat_plugin_macos.sh --action install --dry-run
+
+# Toon alle resolved install/uninstall paden
+./scripts/install_acrobat_plugin_macos.sh --action list-targets
+
+# Toon actuele installatiestatus op bekende paden
+./scripts/install_acrobat_plugin_macos.sh --action status
+
+# JSON output voor automation
+./scripts/install_acrobat_plugin_macos.sh --action status --json
+
+# CI gate: faal als plug-in niet geïnstalleerd is
+./scripts/install_acrobat_plugin_macos.sh --action status --require-installed
+```
+
+`--action uninstall` controleert meerdere bekende Acrobat plug-in locaties (user + system) en verwijdert gevonden `AcrobatImpositionPlugin.api` bestanden.
 
 ---
 

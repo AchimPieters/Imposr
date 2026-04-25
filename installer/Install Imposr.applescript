@@ -17,19 +17,19 @@ property kAcrobatBundles : {¬
 
 -- ── Entry point ───────────────────────────────────────────────────────────────
 on run
-    set theChoice to button returned of (display dialog ¬
-        "Welcome to the " & kProductName & " " & kVersion & " installer for Adobe Acrobat." & return & return & ¬
-        "• Click  Install  to add the plug-in to Acrobat." & return & ¬
-        "• Click  Uninstall  to remove a previous installation." ¬
-        buttons {"Uninstall", "Cancel", "Install"} ¬
-        default button "Install" cancel button "Cancel" ¬
-        with title kProductName & " Plug-in Installer" ¬
-        with icon note)
+    set welcomeText to "Welcome to the " & kProductName & " " & kVersion & " installer for Adobe Acrobat." & return & return & ¬
+        "Please select an option and click Continue."
+    set actionList to {"Install a " & kProductName & " plug-in", "Uninstall a " & kProductName & " plug-in", "Open an Acrobat plug-in folder in the Finder"}
+    set selectedAction to choose from list actionList with title (kProductName & " Plug-in Installer") with prompt welcomeText default items {"Install a " & kProductName & " plug-in"} OK button name "Continue" cancel button name "Quit"
+    if selectedAction is false then return
+    set selectedActionText to item 1 of selectedAction
 
-    if theChoice is "Install" then
+    if selectedActionText is "Install a " & kProductName & " plug-in" then
         doInstall()
-    else if theChoice is "Uninstall" then
+    else if selectedActionText is "Uninstall a " & kProductName & " plug-in" then
         doUninstall()
+    else if selectedActionText is "Open an Acrobat plug-in folder in the Finder" then
+        doOpenPluginsFolder()
     end if
 end run
 
@@ -52,6 +52,30 @@ on findAcrobatPluginsDir()
     return ""
 end findAcrobatPluginsDir
 
+on findAcrobatBundlePath()
+    repeat with bundlePath in kAcrobatBundles
+        if shellTest("test -d " & quoted form of (bundlePath as string) & " && echo yes || echo no") then
+            return bundlePath as string
+        end if
+    end repeat
+    return ""
+end findAcrobatBundlePath
+
+on chooseAcrobatBundlePath(currentBundlePath)
+    try
+        set acrobatAppAlias to choose application with prompt "Select Adobe Acrobat.app:" default location (path to applications folder)
+        set acrobatAppPath to POSIX path of acrobatAppAlias
+        if acrobatAppPath ends with "/" then set acrobatAppPath to text 1 thru -2 of acrobatAppPath
+        if acrobatAppPath does not end with ".app" then
+            display dialog "Please select an Adobe Acrobat.app bundle." buttons {"OK"} default button "OK" with title kProductName & " Installer" with icon caution
+            return currentBundlePath
+        end if
+        return acrobatAppPath
+    on error
+        return currentBundlePath
+    end try
+end chooseAcrobatBundlePath
+
 on apiSourcePath()
     -- The .api is stored in this app bundle's Contents/Resources/.
     set appPath to POSIX path of (path to me)
@@ -70,21 +94,32 @@ on doInstall()
         return
     end if
 
-    -- Auto-detect Acrobat.
-    set pluginsDir to findAcrobatPluginsDir()
+    set acrobatBundlePath to findAcrobatBundlePath()
+    repeat
+        set installTargetText to "Not selected"
+        if acrobatBundlePath is not "" then set installTargetText to acrobatBundlePath
+        set installChoice to button returned of (display dialog ¬
+            "Will install to this copy of Acrobat, or click Browse to choose another." & return & return & ¬
+            installTargetText & return & return & ¬
+            "Plug-in to install:" & return & ¬
+            kPluginFileName ¬
+            buttons {"Quit", "Browse…", "Install"} default button "Install" ¬
+            with title kProductName & " Plug-in Installer" ¬
+            with icon note)
+        if installChoice is "Quit" then return
+        if installChoice is "Browse…" then
+            set acrobatBundlePath to chooseAcrobatBundlePath(acrobatBundlePath)
+            if acrobatBundlePath is "" then return
+        else if installChoice is "Install" then
+            exit repeat
+        end if
+    end repeat
 
-    if pluginsDir is "" then
-        -- Let the user locate Acrobat manually.
-        try
-            set acrobatApp to POSIX path of (choose file ¬
-                with prompt "Adobe Acrobat was not found automatically. Please locate Adobe Acrobat.app:" ¬
-                default location (path to applications folder))
-            set pluginsDir to acrobatApp & "Contents/Plug-ins"
-        on error
-            -- User cancelled browse.
-            return
-        end try
+    if acrobatBundlePath is "" then
+        display dialog "No Adobe Acrobat app selected." buttons {"OK"} default button "OK" with title kProductName & " Installer" with icon caution
+        return
     end if
+    set pluginsDir to acrobatBundlePath & "/Contents/Plug-ins"
 
     set apiDst to pluginsDir & "/" & kPluginFileName
 
@@ -109,6 +144,27 @@ on doInstall()
         buttons {"OK"} default button "OK" ¬
         with title kProductName & " Installer" with icon note
 end doInstall
+
+on doOpenPluginsFolder()
+    set pluginsDir to findAcrobatPluginsDir()
+    if pluginsDir is "" then
+        set acrobatBundlePath to chooseAcrobatBundlePath("")
+        if acrobatBundlePath is "" then return
+        set pluginsDir to acrobatBundlePath & "/Contents/Plug-ins"
+    end if
+
+    try
+        do shell script "mkdir -p " & quoted form of pluginsDir
+        do shell script "open " & quoted form of pluginsDir
+        display dialog "Opened plug-in folder:" & return & pluginsDir ¬
+            buttons {"OK"} default button "OK" ¬
+            with title kProductName & " Plug-in Installer" with icon note
+    on error errMsg
+        display dialog "Could not open plug-in folder." & return & return & errMsg ¬
+            buttons {"OK"} default button "OK" ¬
+            with title kProductName & " Plug-in Installer" with icon stop
+    end try
+end doOpenPluginsFolder
 
 -- ── Uninstall ─────────────────────────────────────────────────────────────────
 on doUninstall()

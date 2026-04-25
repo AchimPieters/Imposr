@@ -54,6 +54,10 @@ def _is_nonempty_and_not_tbd(value: str) -> bool:
 
 
 def _row_looks_mock(row: dict) -> bool:
+    for key in ("acrobat_version", "sdk_version", "execution_mode", "notes"):
+        value = str(row.get(key, "")).strip().lower()
+        if "mock" in value or value.startswith("simulated"):
+            return True
     notes = str(row.get("notes", "")).strip().lower()
     if "mock" in notes:
         return True
