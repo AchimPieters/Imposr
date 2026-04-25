@@ -65,3 +65,16 @@ dist/
 .env
 .env.local
 .env.*.local
+
+# Adobe Acrobat SDK — do not commit; download from developer.adobe.com
+Acrobat_DC_SDK*.dmg
+Acrobat_DC_SDK_Windows*/
+AcrobatSDK/
+AcrobatSDK_DC*/
+
+# CPack build output — generated artifacts, not source
+_CPack_Packages/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store

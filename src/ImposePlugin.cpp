@@ -19,6 +19,9 @@
 
 namespace {
 
+ACCB1 void ACCB2 ExecuteCreateBooklet(void* clientData);
+ACCB1 void ACCB2 ExecuteNUpPages(void* clientData);
+ACCB1 void ACCB2 ExecuteStepAndRepeat(void* clientData);
 ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData);
 ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData);
 ACCB1 void ACCB2 ExecutePresetSave(void* clientData);
@@ -37,6 +40,9 @@ ACCB1 void ACCB2 ExecutePanelSheetA3(void* clientData);
 ACCB1 void ACCB2 ExecutePanelExportDialogPackage(void* clientData);
 ACCB1 void ACCB2 ExecutePanelOpenUnifiedDialog(void* clientData);
 
+AVMenuItem gCreateBookletMenuItem = nullptr;
+AVMenuItem gNUpPagesMenuItem = nullptr;
+AVMenuItem gStepAndRepeatMenuItem = nullptr;
 AVMenuItem gPluginMenuItem = nullptr;
 AVMenuItem gPluginReportMenuItem = nullptr;
 AVMenuItem gPluginPresetSaveMenuItem = nullptr;
@@ -55,6 +61,9 @@ AVMenuItem gPluginPanelSheetA3MenuItem = nullptr;
 AVMenuItem gPluginPanelExportDialogPackageMenuItem = nullptr;
 AVMenuItem gPluginPanelOpenUnifiedDialogMenuItem = nullptr;
 AVMenu gPluginSubMenu = nullptr;
+AVExecuteProc gCreateBookletProc = nullptr;
+AVExecuteProc gNUpPagesProc = nullptr;
+AVExecuteProc gStepAndRepeatProc = nullptr;
 // Declared as AVExecuteProc (the actual callback type) rather than ASCallback
 // (void*) to avoid C++ hard type errors on the void* = func_ptr assignment.
 // AVMenuItemNew and AVAppRegisterForPageViewClicks both take AVExecuteProc directly.
@@ -77,7 +86,10 @@ AVExecuteProc gPanelExportDialogPackageProc = nullptr;
 AVExecuteProc gPanelOpenUnifiedDialogProc = nullptr;
 
 constexpr const char* kExtensionName = "AcrobatImpositionPlugin";
-constexpr const char* kPluginMenuTitle = "Acrobat Imposition Plugin";
+constexpr const char* kPluginMenuTitle = "Imposr";
+constexpr const char* kMenuItemCreateBookletTitle = "Create Booklet...";
+constexpr const char* kMenuItemNUpPagesTitle = "N-Up Pages...";
+constexpr const char* kMenuItemStepAndRepeatTitle = "Step & Repeat...";
 constexpr const char* kMenuItemTitle = "2-Up Demo";
 constexpr const char* kMenuItemReportTitle = "2-Up Report PDF";
 constexpr const char* kMenuItemPresetSaveTitle = "Preset: Save default";
@@ -509,6 +521,99 @@ bool LoadSdkPlacementOps(const std::string& path,
     return true;
 }
 
+// Build a CropBox-aware PDF CTM for placing a Form XObject at targetRect.
+//
+// PDEFormCreate uses the Form BBox as the form's local coordinate system.
+// The CTM defines how form-local points map to output-page user space:
+//   x' = a*x + c*y + e
+//   y' = b*x + d*y + f
+//
+// For pages where CropBox.left != 0 or CropBox.bottom != 0, a naive CTM
+// derived from targetRect alone misplaces the content.  This function
+// computes the correct CTM from the actual CropBox origin and dimensions.
+static ASFixedMatrix BuildCropBoxCorrectCtm(const aimp::AcrobatSdkPlacementOp& op,
+                                            const ASFixedRect& srcBBox) {
+    const double cropX1 = ASFixedToFloat(srcBBox.left);
+    const double cropY1 = ASFixedToFloat(srcBBox.bottom);
+    const double cropX2 = ASFixedToFloat(srcBBox.right);
+    const double cropY2 = ASFixedToFloat(srcBBox.top);
+    const double cropW  = cropX2 - cropX1;
+    const double cropH  = cropY2 - cropY1;
+    const double tx = op.targetRect.x;
+    const double ty = op.targetRect.y;
+    const double tw = op.targetRect.width;
+    const double th = op.targetRect.height;
+
+    ASFixedMatrix ctm {};
+    if (cropW <= 0.0 || cropH <= 0.0) {
+        // Degenerate BBox — fall back to plan CTM verbatim.
+        ctm.a = ASFloatToFixed(static_cast<ASReal>(op.ctmA));
+        ctm.b = ASFloatToFixed(static_cast<ASReal>(op.ctmB));
+        ctm.c = ASFloatToFixed(static_cast<ASReal>(op.ctmC));
+        ctm.d = ASFloatToFixed(static_cast<ASReal>(op.ctmD));
+        ctm.h = ASFloatToFixed(static_cast<ASReal>(op.ctmE));
+        ctm.v = ASFloatToFixed(static_cast<ASReal>(op.ctmF));
+        return ctm;
+    }
+
+    const int rot = NormalizeRotationDegrees(op.rotationDegrees);
+
+    if (rot == 0) {
+        // Scale from CropBox to targetRect, account for CropBox origin.
+        const double sx = tw / cropW;
+        const double sy = th / cropH;
+        ctm.a = ASFloatToFixed(static_cast<ASReal>(sx));
+        ctm.b = fixedZero;
+        ctm.c = fixedZero;
+        ctm.d = ASFloatToFixed(static_cast<ASReal>(sy));
+        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx - sx * cropX1));
+        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty - sy * cropY1));
+    } else if (rot == 90) {
+        // 90° CW: source bottom-left → output bottom-right.
+        // b = th/cropW,  c = -tw/cropH
+        const double bv = th / cropW;
+        const double cv = -tw / cropH;
+        ctm.a = fixedZero;
+        ctm.b = ASFloatToFixed(static_cast<ASReal>(bv));
+        ctm.c = ASFloatToFixed(static_cast<ASReal>(cv));
+        ctm.d = fixedZero;
+        // e = tx + tw + c * cropY1 = tx + tw - (tw/cropH)*cropY1
+        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx + tw + cv * cropY1));
+        // f = ty - b * cropX1
+        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty - bv * cropX1));
+    } else if (rot == 180) {
+        // 180°: source bottom-left → output top-right.
+        const double sx = tw / cropW;
+        const double sy = th / cropH;
+        ctm.a = ASFloatToFixed(static_cast<ASReal>(-sx));
+        ctm.b = fixedZero;
+        ctm.c = fixedZero;
+        ctm.d = ASFloatToFixed(static_cast<ASReal>(-sy));
+        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx + tw + sx * cropX1));
+        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty + th + sy * cropY1));
+    } else if (rot == 270) {
+        // 270° CW (= 90° CCW): source bottom-left → output top-left.
+        // b = -th/cropW,  c = tw/cropH
+        const double bv = -th / cropW;
+        const double cv =  tw / cropH;
+        ctm.a = fixedZero;
+        ctm.b = ASFloatToFixed(static_cast<ASReal>(bv));
+        ctm.c = ASFloatToFixed(static_cast<ASReal>(cv));
+        ctm.d = fixedZero;
+        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx - cv * cropY1));
+        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty + th - bv * cropX1));
+    } else {
+        // Unsupported arbitrary rotation — fall back to plan CTM.
+        ctm.a = ASFloatToFixed(static_cast<ASReal>(op.ctmA));
+        ctm.b = ASFloatToFixed(static_cast<ASReal>(op.ctmB));
+        ctm.c = ASFloatToFixed(static_cast<ASReal>(op.ctmC));
+        ctm.d = ASFloatToFixed(static_cast<ASReal>(op.ctmD));
+        ctm.h = ASFloatToFixed(static_cast<ASReal>(op.ctmE));
+        ctm.v = ASFloatToFixed(static_cast<ASReal>(op.ctmF));
+    }
+    return ctm;
+}
+
 bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
                                    const aimp::ImpositionPlan& plan,
                                    const std::string& sdkOpsPath,
@@ -528,10 +633,9 @@ bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
         return false;
     }
 
-#if defined(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER)
-    // True N-up imposition via PDEContent/PDEForm XObject placement.
+    // Native N-up imposition via PDEContent/PDEForm XObject placement.
     // One output page is created per sheet; each source page occupies a slot
-    // on that sheet, placed as a Form XObject with the CTM from the sdk-ops plan.
+    // placed as a Form XObject with a CropBox-corrected CTM.
     PDDoc outDoc = PDDocCreate();
     if (outDoc == nullptr) {
         errorMessage = "PDDocCreate failed";
@@ -582,35 +686,51 @@ bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
                 break;
             }
 
-            // ── Build the placement CTM ───────────────────────────────────────
-            // ASFixedMatrix: {a, b, c, d, h(tx), v(ty)}
-            ASFixedMatrix ctm {};
-            ctm.a = ASFloatToFixed(static_cast<ASReal>(op.ctmA));
-            ctm.b = ASFloatToFixed(static_cast<ASReal>(op.ctmB));
-            ctm.c = ASFloatToFixed(static_cast<ASReal>(op.ctmC));
-            ctm.d = ASFloatToFixed(static_cast<ASReal>(op.ctmD));
-            ctm.h = ASFloatToFixed(static_cast<ASReal>(op.ctmE));
-            ctm.v = ASFloatToFixed(static_cast<ASReal>(op.ctmF));
-
             // ── Create Form XObject from source page content ──────────────────
-            // PDPageAcquirePDEContent flags: kPDEContentToFlattenForm acquires a
-            // snapshot suitable for embedding as a Form XObject.
-            PDEContent srcContent = PDPageAcquirePDEContent(srcPage,
-                                                            kPDEContentToFlattenForm);
-            if (srcContent != nullptr) {
-                // Use the source page's CropBox as the Form bounding box.
-                ASFixedRect srcBBox {};
-                PDPageGetCropBox(srcPage, &srcBBox);
+            // Acquire source content, convert to a Form XObject CosStream via
+            // PDEContentToCosObj(kPDEContentToForm), then wrap with PDEFormCreateFromCosObj.
+            ASFixedRect srcBBox {};
+            PDPageGetCropBox(srcPage, &srcBBox);
 
-                // Create the Form XObject from the source content.
-                PDEForm srcForm = PDEFormCreate(nullptr, &ctm, &srcBBox,
-                                                srcContent, PDDocGetCosDoc(outDoc));
-                if (srcForm != nullptr) {
-                    PDEContentAddElem(outContent, kPDEAfterLast,
-                                      reinterpret_cast<PDEElement>(srcForm));
-                    PDERelease(reinterpret_cast<PDEObject>(srcForm));
+            PDEContent srcContent = PDPageAcquirePDEContent(srcPage, 0);
+            if (srcContent != nullptr) {
+                // PDEContentAttrs carries the BBox for the Form XObject.
+                PDEContentAttrs formAttrs {};
+                formAttrs.flags   = 0;
+                formAttrs.formType = 1;
+                formAttrs.bbox    = srcBBox;
+                // Identity matrix — placement is handled by the PDEForm CTM below.
+                formAttrs.matrix.a = fixedOne;
+                formAttrs.matrix.b = fixedZero;
+                formAttrs.matrix.c = fixedZero;
+                formAttrs.matrix.d = fixedOne;
+                formAttrs.matrix.h = fixedZero;
+                formAttrs.matrix.v = fixedZero;
+
+                CosObj formCosObj {};
+                CosObj resCosObj {};
+                PDEContentToCosObj(srcContent,
+                                   kPDEContentToForm,
+                                   &formAttrs,
+                                   static_cast<ASUns32>(sizeof(formAttrs)),
+                                   PDDocGetCosDoc(outDoc),
+                                   nullptr,
+                                   &formCosObj,
+                                   &resCosObj);
+
+                if (CosObjGetType(formCosObj) != CosNull) {
+                    // Build the placement CTM with CropBox-origin correction.
+                    ASFixedMatrix ctm = BuildCropBoxCorrectCtm(op, srcBBox);
+
+                    PDEForm srcForm = PDEFormCreateFromCosObj(&formCosObj, nullptr, &ctm);
+                    if (srcForm != nullptr) {
+                        PDEContentAddElem(outContent, kPDEAfterLast,
+                                          reinterpret_cast<PDEElement>(srcForm));
+                        PDERelease(reinterpret_cast<PDEObject>(srcForm));
+                    }
                 }
-                PDPageReleasePDEContent(srcPage, kPDEContentToFlattenForm);
+
+                PDPageReleasePDEContent(srcPage, 0);
             }
             PDPageRelease(srcPage);
         }
@@ -628,20 +748,18 @@ bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
 
     // ── Discard top-level annotations on every output page ───────────────────
     // Source page annotations are captured inside Form XObjects as static content.
-    // Any top-level interactive annotations (e.g. widgets from form fields) on
-    // the output pages should be removed so the imposed sheet is non-interactive.
+    // Interactive annotations (widgets) on the output pages are removed so the
+    // imposed sheet is non-interactive.
     {
         const ASInt32 outPageCount = PDDocGetNumPages(outDoc);
         for (ASInt32 pi = 0; pi < outPageCount; ++pi) {
             PDPage pg = PDDocAcquirePage(outDoc, pi);
             if (pg == nullptr) continue;
             // Iterate backwards so removal doesn't shift indices.
-            const ASInt32 annotCount = PDPageGetNumAnnots(pg);
+            // PDPageRemoveAnnot takes an index, not a PDAnnot handle.
+            ASInt32 annotCount = PDPageGetNumAnnots(pg);
             for (ASInt32 ai = annotCount - 1; ai >= 0; --ai) {
-                PDAnnot annot = PDPageGetAnnot(pg, ai);
-                if (annot != nullptr) {
-                    PDPageRemoveAnnot(pg, annot);
-                }
+                PDPageRemoveAnnot(pg, ai);
             }
             PDPageRelease(pg);
         }
@@ -674,22 +792,59 @@ bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
         PDDocClose(outDoc);
         return false;
     }
-    const ASBool saved = PDDocSave(outDoc, PDSaveFull | PDSaveCollectGarbage,
-                                   outPath, nullptr, nullptr, nullptr);
+    // PDDocSave returns void in this SDK; exceptions surface via Acrobat's DURING/HANDLER.
+    PDDocSave(outDoc, PDSaveFull | PDSaveCollectGarbage, outPath, nullptr, nullptr, nullptr);
     ASFileSysReleasePath(fileSys, outPath);
     PDDocClose(outDoc);
-    if (!saved) {
-        errorMessage = "PDDocSave failed";
+    return true;
+}
+
+// Compose an ImpositionPlan directly from a PDDoc — no sdk-ops temp file needed.
+// Builds the sdk-ops JSON in memory, then runs the native SDK composer.
+static bool NativeComposePlan(PDDoc sourceDoc,
+                               const aimp::ImpositionPlan& plan,
+                               const std::string& outputPdfPath,
+                               std::string& errorMessage) {
+    std::error_code fsError;
+    const auto tempDir = std::filesystem::temp_directory_path(fsError);
+    if (fsError) {
+        errorMessage = "Cannot determine temp directory";
         return false;
     }
-    return true;
-#else
-    (void)sourceDoc;
-    (void)outputPdfPath;
-    errorMessage = "Experimental SDK composer is disabled. "
-                   "Build with -DAIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=ON.";
-    return false;
-#endif
+    const auto sdkOpsPath = (tempDir / "imposr-sdk-ops-tmp.json").string();
+    {
+        std::ofstream out(sdkOpsPath);
+        if (!out) {
+            errorMessage = "Cannot write sdk-ops temp file";
+            return false;
+        }
+        out << aimp::ToAcrobatSdkOpsJson(plan);
+    }
+    return TryRunExperimentalSdkComposer(sourceDoc, plan, sdkOpsPath, outputPdfPath, errorMessage);
+}
+
+// Open a PDF in Acrobat and return the AVDoc, or nullptr on failure.
+static AVDoc OpenPdfInAcrobat(const std::string& pdfPath) {
+    const ASFileSys fileSys = ASGetDefaultFileSys();
+    ASPathName asPath = ASFileSysCreatePathName(fileSys, ASAtomFromString("Cstring"),
+                                                pdfPath.c_str(), nullptr);
+    if (asPath == nullptr) return nullptr;
+    AVDoc doc = AVDocOpenFromFile(asPath, fileSys, nullptr);
+    ASFileSysReleasePath(fileSys, asPath);
+    return doc;
+}
+
+// Read the CropBox dimensions of the first page.
+static bool GetFirstPageDimensions(PDDoc pdDoc, double& outW, double& outH) {
+    if (PDDocGetNumPages(pdDoc) <= 0) return false;
+    PDPage pg = PDDocAcquirePage(pdDoc, 0);
+    if (pg == nullptr) return false;
+    ASFixedRect cb {};
+    PDPageGetCropBox(pg, &cb);
+    PDPageRelease(pg);
+    outW = ASFixedToFloat(cb.right)  - ASFixedToFloat(cb.left);
+    outH = ASFixedToFloat(cb.top)    - ASFixedToFloat(cb.bottom);
+    return outW > 0.0 && outH > 0.0;
 }
 
 bool RegisterMenus() {
@@ -707,6 +862,53 @@ bool RegisterMenus() {
     // Add the submenu directly to the menubar (not via a menu item).
     AVMenubarAddMenu(menubar, gPluginSubMenu, APPEND_MENU);
 
+    // ── Core imposition actions ───────────────────────────────────────────────
+    gCreateBookletProc = ASCallbackCreateProto(AVExecuteProc, ExecuteCreateBooklet);
+    gCreateBookletMenuItem = AVMenuItemNew(
+        kMenuItemCreateBookletTitle,
+        "AIMP:CreateBooklet",
+        nullptr,
+        true,
+        NO_SHORTCUT,
+        0,
+        nullptr,
+        nullptr
+    );
+    AVMenuItemSetExecuteProc(gCreateBookletMenuItem, gCreateBookletProc, nullptr);
+    if (gCreateBookletMenuItem == nullptr) { return false; }
+    AVMenuAddMenuItem(gPluginSubMenu, gCreateBookletMenuItem, APPEND_MENUITEM);
+
+    gNUpPagesProc = ASCallbackCreateProto(AVExecuteProc, ExecuteNUpPages);
+    gNUpPagesMenuItem = AVMenuItemNew(
+        kMenuItemNUpPagesTitle,
+        "AIMP:NUpPages",
+        nullptr,
+        true,
+        NO_SHORTCUT,
+        0,
+        nullptr,
+        nullptr
+    );
+    AVMenuItemSetExecuteProc(gNUpPagesMenuItem, gNUpPagesProc, nullptr);
+    if (gNUpPagesMenuItem == nullptr) { return false; }
+    AVMenuAddMenuItem(gPluginSubMenu, gNUpPagesMenuItem, APPEND_MENUITEM);
+
+    gStepAndRepeatProc = ASCallbackCreateProto(AVExecuteProc, ExecuteStepAndRepeat);
+    gStepAndRepeatMenuItem = AVMenuItemNew(
+        kMenuItemStepAndRepeatTitle,
+        "AIMP:StepAndRepeat",
+        nullptr,
+        true,
+        NO_SHORTCUT,
+        0,
+        nullptr,
+        nullptr
+    );
+    AVMenuItemSetExecuteProc(gStepAndRepeatMenuItem, gStepAndRepeatProc, nullptr);
+    if (gStepAndRepeatMenuItem == nullptr) { return false; }
+    AVMenuAddMenuItem(gPluginSubMenu, gStepAndRepeatMenuItem, APPEND_MENUITEM);
+
+    // ── Legacy / advanced items ───────────────────────────────────────────────
     // AVMenuItemNew does NOT take an execute proc — use AVMenuItemSetExecuteProc.
     gMenuExecuteProc = ASCallbackCreateProto(AVExecuteProc, ExecuteTwoUpDemo);
     gPluginMenuItem = AVMenuItemNew(
@@ -1002,6 +1204,214 @@ bool RegisterMenus() {
     return true;
 }
 
+// ── Create Booklet ─────────────────────────────────────────────────────────
+// Saddle-stitch booklet: two source pages per sheet, sheet width = 2 × page width.
+// Pads to next multiple of 4 automatically.
+ACCB1 void ACCB2 ExecuteCreateBooklet(void* clientData) {
+    DURING
+        AVDoc activeDoc = AVAppGetActiveDoc();
+        if (activeDoc == nullptr) {
+            ShowInfoDialog("Open eerst een PDF in Acrobat om een booklet van te maken.");
+            E_RTRN_VOID;
+        }
+        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
+        if (pdDoc == nullptr) {
+            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
+            E_RTRN_VOID;
+        }
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        if (pageCount <= 0) {
+            ShowInfoDialog("Het document bevat geen pagina's.");
+            E_RTRN_VOID;
+        }
+
+        double pageW = 595.276;
+        double pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+        // Sheet is two page-widths wide (landscape booklet spread).
+        const aimp::SheetSize sheetSize { pageW * 2.0, pageH };
+
+        aimp::BuildOptions opts {};
+        opts.scaleToFit       = false;
+        opts.autoRotateToFit  = false;
+        opts.padToMultiple    = 4;
+
+        const auto plan = aimp::BookletPlanner::Build(
+            "active-document",
+            static_cast<std::uint32_t>(pageCount),
+            sheetSize,
+            opts
+        );
+
+        std::error_code fsError;
+        const auto tempDir = std::filesystem::temp_directory_path(fsError);
+        if (fsError) { ShowInfoDialog("Kan temp map niet bepalen."); E_RTRN_VOID; }
+
+        const auto outputPath = (tempDir / ("imposr-booklet-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string composeError;
+        if (!NativeComposePlan(pdDoc, plan, outputPath, composeError)) {
+            ShowInfoDialog("Booklet aanmaken mislukt:\n" + composeError);
+            E_RTRN_VOID;
+        }
+
+        const std::size_t sheetCountResult = plan.placements.empty() ? 0u :
+            static_cast<std::size_t>(plan.placements.back().sheetIndex) + 1u;
+
+        OpenPdfInAcrobat(outputPath);
+        std::ostringstream msg;
+        msg << "Booklet gemaakt (" << pageCount << " pagina's, "
+            << sheetCountResult << " vellen).\n\n" << outputPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Er trad een fout op bij Create Booklet.");
+    END_HANDLER
+}
+
+// ── N-Up Pages ─────────────────────────────────────────────────────────────
+// Default: 2×2 n-up on a sheet twice the source page size.
+ACCB1 void ACCB2 ExecuteNUpPages(void* clientData) {
+    DURING
+        AVDoc activeDoc = AVAppGetActiveDoc();
+        if (activeDoc == nullptr) {
+            ShowInfoDialog("Open eerst een PDF in Acrobat voor N-Up.");
+            E_RTRN_VOID;
+        }
+        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
+        if (pdDoc == nullptr) {
+            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
+            E_RTRN_VOID;
+        }
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        if (pageCount <= 0) {
+            ShowInfoDialog("Het document bevat geen pagina's.");
+            E_RTRN_VOID;
+        }
+
+        double pageW = 595.276;
+        double pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+        constexpr std::uint32_t cols = 2u;
+        constexpr std::uint32_t rows = 2u;
+        const aimp::SheetSize sheetSize { pageW * cols, pageH * rows };
+
+        aimp::BuildOptions opts {};
+        opts.scaleToFit      = true;
+        opts.autoRotateToFit = true;
+        opts.sourcePageWidthPoints  = pageW;
+        opts.sourcePageHeightPoints = pageH;
+
+        const auto plan = aimp::NUpPlanner::Build(
+            "active-document",
+            static_cast<std::uint32_t>(pageCount),
+            sheetSize,
+            cols,
+            rows,
+            opts
+        );
+
+        std::error_code fsError;
+        const auto tempDir = std::filesystem::temp_directory_path(fsError);
+        if (fsError) { ShowInfoDialog("Kan temp map niet bepalen."); E_RTRN_VOID; }
+
+        const auto outputPath = (tempDir / ("imposr-nup-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string composeError;
+        if (!NativeComposePlan(pdDoc, plan, outputPath, composeError)) {
+            ShowInfoDialog("N-Up aanmaken mislukt:\n" + composeError);
+            E_RTRN_VOID;
+        }
+
+        const std::size_t sheetCountResult = plan.placements.empty() ? 0u :
+            static_cast<std::size_t>(plan.placements.back().sheetIndex) + 1u;
+
+        OpenPdfInAcrobat(outputPath);
+        std::ostringstream msg;
+        msg << cols << "×" << rows << " N-Up gemaakt ("
+            << pageCount << " pagina's, " << sheetCountResult << " vellen).\n\n" << outputPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Er trad een fout op bij N-Up Pages.");
+    END_HANDLER
+}
+
+// ── Step & Repeat ──────────────────────────────────────────────────────────
+// Default: 2×2 repetition of page 1 on a sheet twice the page size.
+ACCB1 void ACCB2 ExecuteStepAndRepeat(void* clientData) {
+    DURING
+        AVDoc activeDoc = AVAppGetActiveDoc();
+        if (activeDoc == nullptr) {
+            ShowInfoDialog("Open eerst een PDF in Acrobat voor Step & Repeat.");
+            E_RTRN_VOID;
+        }
+        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
+        if (pdDoc == nullptr) {
+            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
+            E_RTRN_VOID;
+        }
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        if (pageCount <= 0) {
+            ShowInfoDialog("Het document bevat geen pagina's.");
+            E_RTRN_VOID;
+        }
+
+        double pageW = 595.276;
+        double pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+        constexpr std::uint32_t cols = 2u;
+        constexpr std::uint32_t rows = 2u;
+        const aimp::SheetSize sheetSize { pageW * cols, pageH * rows };
+
+        aimp::StepRepeatConfig stepCfg {};
+        stepCfg.repeatX      = cols;
+        stepCfg.repeatY      = rows;
+        stepCfg.stepXPoints  = pageW;
+        stepCfg.stepYPoints  = pageH;
+        stepCfg.seedRect     = { 0.0, 0.0, pageW, pageH };
+
+        aimp::BuildOptions opts {};
+        opts.scaleToFit             = true;
+        opts.autoRotateToFit        = false;
+        opts.sourcePageWidthPoints  = pageW;
+        opts.sourcePageHeightPoints = pageH;
+
+        const auto plan = aimp::StepAndRepeatPlanner::Build(
+            "active-document",
+            static_cast<std::uint32_t>(pageCount),
+            sheetSize,
+            stepCfg,
+            opts
+        );
+
+        std::error_code fsError;
+        const auto tempDir = std::filesystem::temp_directory_path(fsError);
+        if (fsError) { ShowInfoDialog("Kan temp map niet bepalen."); E_RTRN_VOID; }
+
+        const auto outputPath = (tempDir / ("imposr-steprepeat-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string composeError;
+        if (!NativeComposePlan(pdDoc, plan, outputPath, composeError)) {
+            ShowInfoDialog("Step & Repeat mislukt:\n" + composeError);
+            E_RTRN_VOID;
+        }
+
+        const std::size_t sheetCountResult = plan.placements.empty() ? 0u :
+            static_cast<std::size_t>(plan.placements.back().sheetIndex) + 1u;
+
+        OpenPdfInAcrobat(outputPath);
+        std::ostringstream msg;
+        msg << "Step & Repeat gemaakt (" << cols << "×" << rows
+            << ", " << pageCount << " bronpagina's, "
+            << sheetCountResult << " vellen).\n\n" << outputPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Er trad een fout op bij Step & Repeat.");
+    END_HANDLER
+}
+
 ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData) {
     DURING
         AVDoc activeDoc = AVAppGetActiveDoc();
@@ -1267,34 +1677,7 @@ ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
         if (!TryRunExperimentalSdkComposer(pdDoc, plan, sdkOpsPath, imposedOutputPath, sdkComposeError)) {
             ShowInfoDialog("Run bundle gereed; native SDK composer niet uitgevoerd:\n" + sdkComposeError);
         } else {
-            // ── Bleed: mirror/scale/extend execution (SDK-gated) ─────────────
-#if defined(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER)
-            {
-                // Re-open the composed output to apply bleed fills if requested.
-                // SolidColor bleed is already handled by the proof PDF layer.
-                // Mirror/Scale/Extend require pixel-level edge sampling which is
-                // performed here via PDPage content manipulation on the imposed output.
-                PDDoc imposedPdDoc = PDDocOpen(
-                    ASFileSysCreatePathName(ASGetDefaultFileSys(),
-                                           ASAtomFromString("Cstring"),
-                                           imposedOutputPath.c_str(), nullptr),
-                    nullptr, nullptr, true);
-                if (imposedPdDoc != nullptr) {
-                    // Bleed execution: the plan's bleed zones describe how to fill
-                    // the bleed margin. Mirror and Scale modes are implemented by
-                    // sampling the edge strip of each placed Form XObject and
-                    // appending a clipped/scaled copy. This requires PDEContent
-                    // manipulation on each output sheet page.
-                    // (Full pixel-level implementation requires rasterise + re-embed;
-                    //  the structural scaffolding is wired here and guarded for M3.)
-                    PDDocClose(imposedPdDoc);
-                }
-            }
-#endif
-            ASFileSys defFS2 = ASGetDefaultFileSys();
-            ASPathName imposedASPath = ASFileSysCreatePathName(defFS2, ASAtomFromString("Cstring"), imposedOutputPath.c_str(), nullptr);
-            AVDoc imposedDoc = AVDocOpenFromFile(imposedASPath, defFS2, nullptr);
-            ASFileSysReleasePath(defFS2, imposedASPath);
+            const AVDoc imposedDoc = OpenPdfInAcrobat(imposedOutputPath);
             if (imposedDoc == nullptr) {
                 ShowInfoDialog("Native output gemaakt, maar kon imposed-output niet automatisch openen:\n" + imposedOutputPath);
             }
@@ -1766,6 +2149,18 @@ extern "C" ACCB1 ASBool ACCB2 PluginInit(void) {
 }
 
 extern "C" ACCB1 ASBool ACCB2 PluginUnload(void) {
+    if (gStepAndRepeatMenuItem != nullptr) {
+        AVMenuItemRemove(gStepAndRepeatMenuItem);
+        gStepAndRepeatMenuItem = nullptr;
+    }
+    if (gNUpPagesMenuItem != nullptr) {
+        AVMenuItemRemove(gNUpPagesMenuItem);
+        gNUpPagesMenuItem = nullptr;
+    }
+    if (gCreateBookletMenuItem != nullptr) {
+        AVMenuItemRemove(gCreateBookletMenuItem);
+        gCreateBookletMenuItem = nullptr;
+    }
     if (gPluginPanelOpenUnifiedDialogMenuItem != nullptr) {
         AVMenuItemRemove(gPluginPanelOpenUnifiedDialogMenuItem);
         gPluginPanelOpenUnifiedDialogMenuItem = nullptr;

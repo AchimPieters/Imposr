@@ -9,7 +9,11 @@ set(CMAKE_C_STANDARD 11)
 option(AIMP_BUILD_PLUGIN "Build the Acrobat plug-in target." ON)
 option(AIMP_BUILD_TESTS "Build planner tests." ON)
 option(AIMP_BUILD_CLI "Build the CLI app." ON)
-option(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER "Enable experimental native SDK composer adapter (plugin only)." OFF)
+option(AIMP_NATIVE_PDF_COMPOSER "Enable native Acrobat SDK PDF composer (PDEFormCreate/PDEContentAddElem imposition)." ON)
+# Backward-compat alias kept so existing build scripts that set -DAIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=ON still work.
+if(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER AND NOT AIMP_NATIVE_PDF_COMPOSER)
+  set(AIMP_NATIVE_PDF_COMPOSER ON CACHE BOOL "" FORCE)
+endif()
 option(AIMP_ENABLE_WARNINGS "Enable compiler warnings for all targets." ON)
 option(AIMP_WARNINGS_AS_ERRORS "Treat compiler warnings as errors." OFF)
 option(AIMP_ENABLE_SANITIZERS "Enable address/undefined sanitizers for supported compilers." OFF)
@@ -172,7 +176,9 @@ if(AIMP_BUILD_PLUGIN)
     )
   endif()
 
-  if(AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER)
+  if(AIMP_NATIVE_PDF_COMPOSER)
+    target_compile_definitions(${PLUGIN_NAME} PRIVATE AIMP_NATIVE_PDF_COMPOSER=1)
+    # Keep the old macro for code that still uses it.
     target_compile_definitions(${PLUGIN_NAME} PRIVATE AIMP_ENABLE_EXPERIMENTAL_SDK_COMPOSER=1)
   endif()
 
