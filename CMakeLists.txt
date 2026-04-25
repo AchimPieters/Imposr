@@ -255,6 +255,10 @@ if(AIMP_BUILD_TESTS)
       NAME aimp_host_gate_tooling
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/test_host_gate_tooling.py
     )
+    add_test(
+      NAME aimp_macos_installer_cli
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/test_macos_installer_cli.py
+    )
   endif()
   if(AIMP_BUILD_CLI)
     add_test(

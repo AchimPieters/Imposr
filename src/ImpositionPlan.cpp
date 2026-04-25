@@ -984,6 +984,29 @@ struct JP {
     bool parse(JVal& v) { ws(); return parseVal(v) && (ws(), p == src.size()); }
 };
 
+bool TryReadStrictUInt(const JVal* value, std::uint32_t& out) {
+    if (!value || value->k != JVal::K::Num || !std::isfinite(value->n)) {
+        return false;
+    }
+    if (value->n < 0.0 || value->n > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
+        return false;
+    }
+    const double truncated = std::floor(value->n);
+    if (std::abs(value->n - truncated) > 1e-9) {
+        return false;
+    }
+    out = static_cast<std::uint32_t>(truncated);
+    return true;
+}
+
+bool TryReadFiniteNumber(const JVal* value, double& out) {
+    if (!value || value->k != JVal::K::Num || !std::isfinite(value->n)) {
+        return false;
+    }
+    out = value->n;
+    return true;
+}
+
 } // anonymous namespace
 
 bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
@@ -1005,7 +1028,9 @@ bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
         return false;
     }
 
+    std::size_t opOrdinal = 0;
     for (const JVal& item : ops->a) {
+        ++opOrdinal;
         if (item.k != JVal::K::Obj) continue;
 
         const JVal* opField = item.get("op");
@@ -1014,36 +1039,74 @@ bool ParseAcrobatSdkOpsJson(const std::string& sdkOpsJson,
         const JVal* sheetF = item.get("sheetIndex");
         const JVal* slotF  = item.get("slotIndex");
         if (!sheetF || !slotF) {
-            errorMessage = "sdk-ops: operation missing sheetIndex or slotIndex";
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " missing sheetIndex or slotIndex";
             outOps.clear();
             return false;
         }
 
         AcrobatSdkPlacementOp op {};
-        op.sheetIndex = sheetF->asUInt();
-        op.slotIndex  = slotF->asUInt();
+        if (!TryReadStrictUInt(sheetF, op.sheetIndex) ||
+            !TryReadStrictUInt(slotF, op.slotIndex)) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " sheetIndex/slotIndex must be non-negative integers";
+            outOps.clear();
+            return false;
+        }
 
         if (const JVal* f = item.get("isBlank"))        op.isBlank       = f->asBool();
         if (const JVal* f = item.get("rotationDegrees")) op.rotationDegrees = f->asNum();
         if (const JVal* f = item.get("scale"))           op.scale          = f->asNum(1.0);
 
-        if (const JVal* src = item.get("source")) {
-            if (const JVal* f = src->get("documentId"))  op.sourceDocumentId = f->asStr();
-            if (const JVal* f = src->get("pageIndex"))   op.sourcePageIndex  = f->asUInt(kBlankPageIndex);
+        const JVal* src = item.get("source");
+        if (!src || src->k != JVal::K::Obj) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " missing source object";
+            outOps.clear();
+            return false;
         }
-        if (const JVal* r = item.get("targetRect")) {
-            if (const JVal* f = r->get("x"))      op.targetRect.x      = f->asNum();
-            if (const JVal* f = r->get("y"))      op.targetRect.y      = f->asNum();
-            if (const JVal* f = r->get("width"))  op.targetRect.width  = f->asNum();
-            if (const JVal* f = r->get("height")) op.targetRect.height = f->asNum();
+        if (const JVal* f = src->get("documentId"))  op.sourceDocumentId = f->asStr();
+        const JVal* sourcePageField = src->get("pageIndex");
+        if (!sourcePageField) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " source.pageIndex is required";
+            outOps.clear();
+            return false;
         }
-        if (const JVal* ctm = item.get("ctm")) {
-            if (const JVal* f = ctm->get("a")) op.ctmA = f->asNum();
-            if (const JVal* f = ctm->get("b")) op.ctmB = f->asNum();
-            if (const JVal* f = ctm->get("c")) op.ctmC = f->asNum();
-            if (const JVal* f = ctm->get("d")) op.ctmD = f->asNum();
-            if (const JVal* f = ctm->get("e")) op.ctmE = f->asNum();
-            if (const JVal* f = ctm->get("f")) op.ctmF = f->asNum();
+        std::uint32_t sourcePageIndex = 0;
+        if (!TryReadStrictUInt(sourcePageField, sourcePageIndex)) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " source.pageIndex must be a non-negative integer";
+            outOps.clear();
+            return false;
+        }
+        op.sourcePageIndex = sourcePageIndex;
+
+        const JVal* targetRect = item.get("targetRect");
+        if (!targetRect || targetRect->k != JVal::K::Obj) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " missing targetRect object";
+            outOps.clear();
+            return false;
+        }
+        if (!TryReadFiniteNumber(targetRect->get("x"), op.targetRect.x) ||
+            !TryReadFiniteNumber(targetRect->get("y"), op.targetRect.y) ||
+            !TryReadFiniteNumber(targetRect->get("width"), op.targetRect.width) ||
+            !TryReadFiniteNumber(targetRect->get("height"), op.targetRect.height)) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " targetRect fields x/y/width/height must be finite numbers";
+            outOps.clear();
+            return false;
+        }
+
+        const JVal* ctm = item.get("ctm");
+        if (!ctm || ctm->k != JVal::K::Obj) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " missing ctm object";
+            outOps.clear();
+            return false;
+        }
+        if (!TryReadFiniteNumber(ctm->get("a"), op.ctmA) ||
+            !TryReadFiniteNumber(ctm->get("b"), op.ctmB) ||
+            !TryReadFiniteNumber(ctm->get("c"), op.ctmC) ||
+            !TryReadFiniteNumber(ctm->get("d"), op.ctmD) ||
+            !TryReadFiniteNumber(ctm->get("e"), op.ctmE) ||
+            !TryReadFiniteNumber(ctm->get("f"), op.ctmF)) {
+            errorMessage = "sdk-ops: op#" + std::to_string(opOrdinal) + " ctm fields a/b/c/d/e/f must be finite numbers";
+            outOps.clear();
+            return false;
         }
 
         op.isBlank = op.isBlank || (op.sourcePageIndex == kBlankPageIndex);
@@ -1062,6 +1125,20 @@ std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
                                                    const std::vector<AcrobatSdkPlacementOp>& ops) {
     const auto nearlyEqual = [](double a, double b, double eps = 0.01) {
         return std::abs(a - b) <= eps;
+    };
+    const auto normalizeDegrees = [](double degrees) {
+        double value = std::fmod(degrees, 360.0);
+        if (value < 0.0) {
+            value += 360.0;
+        }
+        return value;
+    };
+    const auto isQuarterTurnRotation = [&nearlyEqual, &normalizeDegrees](double degrees) {
+        const double normalized = normalizeDegrees(degrees);
+        return nearlyEqual(normalized, 0.0, 0.5) ||
+               nearlyEqual(normalized, 90.0, 0.5) ||
+               nearlyEqual(normalized, 180.0, 0.5) ||
+               nearlyEqual(normalized, 270.0, 0.5);
     };
     const auto expectedFromRectAndRotation = [](const AcrobatSdkPlacementOp& op) {
         PlacementCtm ctm {};
@@ -1105,18 +1182,43 @@ std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
     }
     std::set<std::pair<std::uint32_t, std::uint32_t>> seenSheetSlots;
     for (const auto& op : ops) {
+        const std::string slotContext = "[sheet=" + std::to_string(op.sheetIndex) +
+                                        ", slot=" + std::to_string(op.slotIndex) + "] ";
         const auto key = std::make_pair(op.sheetIndex, op.slotIndex);
         if (!seenSheetSlots.insert(key).second) {
-            issues.push_back({"sdk-ops-duplicate-slot", "Duplicate sheetIndex/slotIndex pair in sdk-ops."});
+            issues.push_back({"sdk-ops-duplicate-slot", slotContext + "Duplicate sheetIndex/slotIndex pair in sdk-ops."});
         }
         if (!expectedSheetSlots.empty() && expectedSheetSlots.find(key) == expectedSheetSlots.end()) {
-            issues.push_back({"sdk-ops-unexpected-slot", "sdk-ops contains a sheetIndex/slotIndex pair not present in planner output."});
+            issues.push_back({"sdk-ops-unexpected-slot", slotContext + "sdk-ops contains a sheetIndex/slotIndex pair not present in planner output."});
         }
         if (!op.isBlank && op.sourcePageIndex >= plan.sourcePageCount) {
-            issues.push_back({"sdk-ops-invalid-source-page", "sdk-ops references source page outside sourcePageCount."});
+            issues.push_back({"sdk-ops-invalid-source-page", slotContext + "sdk-ops references source page outside sourcePageCount."});
+        }
+        if (!op.isBlank && op.sourceDocumentId.empty()) {
+            issues.push_back({"sdk-ops-missing-source-document", slotContext + "sdk-ops non-blank placement is missing source.documentId."});
+        }
+        if (op.isBlank && op.sourcePageIndex != kBlankPageIndex) {
+            issues.push_back({"sdk-ops-blank-source-mismatch", slotContext + "sdk-ops blank placement should use blank source.pageIndex sentinel."});
+        }
+        if (!std::isfinite(op.scale) || op.scale <= 0.0) {
+            issues.push_back({"sdk-ops-invalid-scale", slotContext + "sdk-ops scale must be a finite positive number."});
+        }
+        if (!std::isfinite(op.rotationDegrees)) {
+            issues.push_back({"sdk-ops-invalid-rotation-value", slotContext + "sdk-ops rotationDegrees must be a finite number."});
+        }
+        if (!std::isfinite(op.targetRect.x) || !std::isfinite(op.targetRect.y) ||
+            !std::isfinite(op.targetRect.width) || !std::isfinite(op.targetRect.height)) {
+            issues.push_back({"sdk-ops-invalid-target-rect-numeric", slotContext + "sdk-ops targetRect values must be finite numbers."});
+        }
+        if (!std::isfinite(op.ctmA) || !std::isfinite(op.ctmB) || !std::isfinite(op.ctmC) ||
+            !std::isfinite(op.ctmD) || !std::isfinite(op.ctmE) || !std::isfinite(op.ctmF)) {
+            issues.push_back({"sdk-ops-invalid-ctm-numeric", slotContext + "sdk-ops CTM values must be finite numbers."});
         }
         if (op.targetRect.width <= 0.0 || op.targetRect.height <= 0.0) {
-            issues.push_back({"sdk-ops-invalid-target-rect", "sdk-ops targetRect must have positive width/height."});
+            issues.push_back({"sdk-ops-invalid-target-rect", slotContext + "sdk-ops targetRect must have positive width/height."});
+        }
+        if (!isQuarterTurnRotation(op.rotationDegrees)) {
+            issues.push_back({"sdk-ops-unsupported-rotation", slotContext + "sdk-ops rotationDegrees must be near 0/90/180/270 for native compose parity."});
         }
         const PlacementCtm expected = expectedFromRectAndRotation(op);
         if (!nearlyEqual(op.ctmA, expected.a) ||
@@ -1125,11 +1227,25 @@ std::vector<ValidationIssue> ValidateAcrobatSdkOps(const ImpositionPlan& plan,
             !nearlyEqual(op.ctmD, expected.d) ||
             !nearlyEqual(op.ctmE, expected.e) ||
             !nearlyEqual(op.ctmF, expected.f)) {
-            issues.push_back({"sdk-ops-ctm-parity-mismatch", "sdk-ops CTM does not match planner targetRect/rotation parity expectations."});
+            issues.push_back({"sdk-ops-ctm-parity-mismatch", slotContext + "sdk-ops CTM does not match planner targetRect/rotation parity expectations."});
         }
     }
 
-    return issues;
+    for (const auto& expectedKey : expectedSheetSlots) {
+        if (seenSheetSlots.find(expectedKey) == seenSheetSlots.end()) {
+            issues.push_back({"sdk-ops-missing-slot", "sdk-ops is missing a planner sheetIndex/slotIndex pair."});
+        }
+    }
+
+    std::vector<ValidationIssue> deduped;
+    deduped.reserve(issues.size());
+    std::set<std::string> seen;
+    for (const auto& issue : issues) {
+        if (seen.insert(issue.code).second) {
+            deduped.push_back(issue);
+        }
+    }
+    return deduped;
 }
 
 bool BuildSheetComposeBuckets(const ImpositionPlan& plan,
@@ -1141,7 +1257,31 @@ bool BuildSheetComposeBuckets(const ImpositionPlan& plan,
 
     const auto issues = ValidateAcrobatSdkOps(plan, ops);
     if (!issues.empty()) {
-        errorMessage = "Cannot build sheet compose buckets because sdk-ops validation failed.";
+        errorMessage = "Cannot build sheet compose buckets because sdk-ops validation failed";
+        std::vector<std::string> issueCodes;
+        std::set<std::string> seenCodes;
+        for (const auto& issue : issues) {
+            if (issue.code.empty()) {
+                continue;
+            }
+            if (seenCodes.insert(issue.code).second) {
+                issueCodes.push_back(issue.code);
+            }
+            if (issueCodes.size() >= 3) {
+                break;
+            }
+        }
+        if (!issueCodes.empty()) {
+            errorMessage += " (";
+            for (std::size_t i = 0; i < issueCodes.size(); ++i) {
+                if (i != 0) {
+                    errorMessage += ", ";
+                }
+                errorMessage += issueCodes[i];
+            }
+            errorMessage += ")";
+        }
+        errorMessage += ".";
         return false;
     }
 
