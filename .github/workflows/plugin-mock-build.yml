@@ -1,0 +1,37 @@
+name: Plugin mock-SDK build
+
+on:
+  push:
+    branches: ["main", "develop", "release/**"]
+  pull_request:
+
+jobs:
+  plugin-mock:
+    name: ${{ matrix.os }} — plugin (mock SDK)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (mock SDK)
+        run: |
+          cmake -S . -B build-mock \
+            -DAIMP_BUILD_PLUGIN=ON \
+            -DAIMP_MOCK_SDK=ON \
+            -DAIMP_BUILD_TESTS=ON \
+            -DAIMP_BUILD_CLI=ON \
+            -DAIMP_WARNINGS_AS_ERRORS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+
+      - name: Build
+        run: cmake --build build-mock --config Release
+        shell: bash
+
+      - name: Test (core + SDK-ops golden)
+        run: ctest --test-dir build-mock --build-config Release --output-on-failure
+        shell: bash
