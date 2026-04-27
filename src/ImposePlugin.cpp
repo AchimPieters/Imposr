@@ -1,10 +1,20 @@
+// ImposePlugin.cpp — Acrobat imposition plug-in (macOS + Windows)
+// Compiled as Objective-C++ on macOS so AppKit/Foundation types resolve.
+
 #include "aimp/ImpositionPlan.h"
+#include "aimp/PageTools.h"
 #include "aimp/PanelState.h"
 #include "aimp/PdfComposer.h"
 #include "aimp/Preset.h"
+#include "aimp/SampleDocument.h"
+#include "aimp/Shuffle.h"
+#include "aimp/TilePages.h"
+#include "aimp/TrimShift.h"
+#include "aimp/PrinterMarks.h"
+#include "aimp/StickOn.h"
 
-#include <chrono>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -13,109 +23,368 @@
 #include <string>
 #include <vector>
 
-// Acrobat SDK headers.
-// These must resolve through ACROBAT_SDK_DIR include paths.
 #include "PIHeaders.h"
+
+#ifdef MAC_PLATFORM
+#import <AppKit/AppKit.h>
+#import <Foundation/Foundation.h>
+#endif
+
+// ── Forward declarations ──────────────────────────────────────────────────────
 
 namespace {
 
-ACCB1 void ACCB2 ExecuteCreateBooklet(void* clientData);
-ACCB1 void ACCB2 ExecuteNUpPages(void* clientData);
-ACCB1 void ACCB2 ExecuteStepAndRepeat(void* clientData);
-ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData);
-ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData);
-ACCB1 void ACCB2 ExecutePresetSave(void* clientData);
-ACCB1 void ACCB2 ExecutePresetPreview(void* clientData);
-ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData);
-ACCB1 void ACCB2 ExecutePresetValidate(void* clientData);
-ACCB1 void ACCB2 ExecutePresetQuickConfigure(void* clientData);
-ACCB1 void ACCB2 ExecutePanelCycleLayout(void* clientData);
-ACCB1 void ACCB2 ExecutePanelTogglePrepress(void* clientData);
-ACCB1 void ACCB2 ExecutePanelSetOutputTemp(void* clientData);
-ACCB1 void ACCB2 ExecutePanelShowState(void* clientData);
-ACCB1 void ACCB2 ExecutePanelApplyState(void* clientData);
-ACCB1 void ACCB2 ExecutePanelToggleQualityGate(void* clientData);
-ACCB1 void ACCB2 ExecutePanelSheetA4(void* clientData);
-ACCB1 void ACCB2 ExecutePanelSheetA3(void* clientData);
-ACCB1 void ACCB2 ExecutePanelExportDialogPackage(void* clientData);
-ACCB1 void ACCB2 ExecutePanelOpenUnifiedDialog(void* clientData);
+ACCB1 void ACCB2 ExecuteControlPanel(void*);
+ACCB1 void ACCB2 ExecuteBooklet(void*);
+ACCB1 void ACCB2 ExecuteNUpPages(void*);
+ACCB1 void ACCB2 ExecuteStepAndRepeat(void*);
+ACCB1 void ACCB2 ExecuteJoin2Pages(void*);
+ACCB1 void ACCB2 ExecuteShufflePages(void*);
+ACCB1 void ACCB2 ExecuteShuffleEvenOdd(void*);
+ACCB1 void ACCB2 ExecuteReversePages(void*);
+ACCB1 void ACCB2 ExecuteInsertPages(void*);
+ACCB1 void ACCB2 ExecuteTrimShift(void*);
+ACCB1 void ACCB2 ExecuteTilePages(void*);
+ACCB1 void ACCB2 ExecutePageSizes(void*);
+ACCB1 void ACCB2 ExecutePageTools(void*);
+ACCB1 void ACCB2 ExecuteCreep(void*);
+ACCB1 void ACCB2 ExecuteSampleDocument(void*);
+ACCB1 void ACCB2 ExecuteMonitor(void*);
+ACCB1 void ACCB2 ExecuteStickOnText(void*);
+ACCB1 void ACCB2 ExecuteStickOnPdf(void*);
+ACCB1 void ACCB2 ExecuteStickOnMasking(void*);
+ACCB1 void ACCB2 ExecutePeelOffText(void*);
+ACCB1 void ACCB2 ExecutePeelOffMasking(void*);
+ACCB1 void ACCB2 ExecuteRegistrationMarks(void*);
+ACCB1 void ACCB2 ExecuteSequences(void*);
+ACCB1 void ACCB2 ExecutePlayback(void*);
+ACCB1 void ACCB2 ExecuteRememberLast(void*);
+ACCB1 void ACCB2 ExecutePreferences(void*);
+ACCB1 void ACCB2 ExecuteCustomizePanel(void*);
+ACCB1 void ACCB2 ExecuteHelpAbout(void*);
 
-AVMenuItem gCreateBookletMenuItem = nullptr;
-AVMenuItem gNUpPagesMenuItem = nullptr;
-AVMenuItem gStepAndRepeatMenuItem = nullptr;
-AVMenuItem gPluginMenuItem = nullptr;
-AVMenuItem gPluginReportMenuItem = nullptr;
-AVMenuItem gPluginPresetSaveMenuItem = nullptr;
-AVMenuItem gPluginPresetPreviewMenuItem = nullptr;
-AVMenuItem gPluginPresetRunMenuItem = nullptr;
-AVMenuItem gPluginPresetValidateMenuItem = nullptr;
-AVMenuItem gPluginPresetQuickConfigMenuItem = nullptr;
-AVMenuItem gPluginPanelCycleLayoutMenuItem = nullptr;
-AVMenuItem gPluginPanelTogglePrepressMenuItem = nullptr;
-AVMenuItem gPluginPanelSetOutputTempMenuItem = nullptr;
-AVMenuItem gPluginPanelShowStateMenuItem = nullptr;
-AVMenuItem gPluginPanelApplyStateMenuItem = nullptr;
-AVMenuItem gPluginPanelToggleQualityGateMenuItem = nullptr;
-AVMenuItem gPluginPanelSheetA4MenuItem = nullptr;
-AVMenuItem gPluginPanelSheetA3MenuItem = nullptr;
-AVMenuItem gPluginPanelExportDialogPackageMenuItem = nullptr;
-AVMenuItem gPluginPanelOpenUnifiedDialogMenuItem = nullptr;
-AVMenu gPluginSubMenu = nullptr;
-AVExecuteProc gCreateBookletProc = nullptr;
-AVExecuteProc gNUpPagesProc = nullptr;
-AVExecuteProc gStepAndRepeatProc = nullptr;
-// Declared as AVExecuteProc (the actual callback type) rather than ASCallback
-// (void*) to avoid C++ hard type errors on the void* = func_ptr assignment.
-// AVMenuItemNew and AVAppRegisterForPageViewClicks both take AVExecuteProc directly.
-AVExecuteProc gMenuExecuteProc = nullptr;
-AVExecuteProc gReportExecuteProc = nullptr;
-AVExecuteProc gPresetSaveProc = nullptr;
-AVExecuteProc gPresetPreviewProc = nullptr;
-AVExecuteProc gPresetRunProc = nullptr;
-AVExecuteProc gPresetValidateProc = nullptr;
-AVExecuteProc gPresetQuickConfigProc = nullptr;
-AVExecuteProc gPanelCycleLayoutProc = nullptr;
-AVExecuteProc gPanelTogglePrepressProc = nullptr;
-AVExecuteProc gPanelSetOutputTempProc = nullptr;
-AVExecuteProc gPanelShowStateProc = nullptr;
-AVExecuteProc gPanelApplyStateProc = nullptr;
-AVExecuteProc gPanelToggleQualityGateProc = nullptr;
-AVExecuteProc gPanelSheetA4Proc = nullptr;
-AVExecuteProc gPanelSheetA3Proc = nullptr;
-AVExecuteProc gPanelExportDialogPackageProc = nullptr;
-AVExecuteProc gPanelOpenUnifiedDialogProc = nullptr;
+} // forward namespace close
 
-constexpr const char* kExtensionName = "AcrobatImpositionPlugin";
-constexpr const char* kPluginMenuTitle = "Imposr";
-constexpr const char* kMenuItemCreateBookletTitle = "Create Booklet...";
-constexpr const char* kMenuItemNUpPagesTitle = "N-Up Pages...";
-constexpr const char* kMenuItemStepAndRepeatTitle = "Step & Repeat...";
-constexpr const char* kMenuItemTitle = "2-Up Demo";
-constexpr const char* kMenuItemReportTitle = "2-Up Report PDF";
-constexpr const char* kMenuItemPresetSaveTitle = "Preset: Save default";
-constexpr const char* kMenuItemPresetPreviewTitle = "Preset: Preview proof";
-constexpr const char* kMenuItemPresetRunTitle = "Preset: Run bundle";
-constexpr const char* kMenuItemPresetValidateTitle = "Preset: Validate active job";
-constexpr const char* kMenuItemPresetQuickConfigTitle = "Preset: Quick configure";
-constexpr const char* kMenuItemPanelCycleLayoutTitle = "Panel: Cycle layout";
-constexpr const char* kMenuItemPanelTogglePrepressTitle = "Panel: Toggle trim+bleed";
-constexpr const char* kMenuItemPanelSetOutputTempTitle = "Panel: Set output temp";
-constexpr const char* kMenuItemPanelShowStateTitle = "Panel: Show state";
-constexpr const char* kMenuItemPanelApplyStateTitle = "Panel: Apply state";
-constexpr const char* kMenuItemPanelToggleQualityGateTitle = "Panel: Toggle quality gate";
-constexpr const char* kMenuItemPanelSheetA4Title = "Panel: Sheet A4";
-constexpr const char* kMenuItemPanelSheetA3Title = "Panel: Sheet A3";
-constexpr const char* kMenuItemPanelExportDialogPackageTitle = "Panel: Export dialog package";
-constexpr const char* kMenuItemPanelOpenUnifiedDialogTitle = "Panel: Open unified dialog";
+// ── macOS Control Panel delegate ──────────────────────────────────────────────
+
+#ifdef MAC_PLATFORM
+@interface ImposeControlPanelDelegate : NSObject
+- (void)onBooklet:(id)sender;
+- (void)onNUp:(id)sender;
+- (void)onStepRepeat:(id)sender;
+- (void)onJoin2Pages:(id)sender;
+- (void)onShufflePages:(id)sender;
+- (void)onReversePages:(id)sender;
+- (void)onTrimShift:(id)sender;
+- (void)onInsertPages:(id)sender;
+- (void)onTilePages:(id)sender;
+- (void)onPageTools:(id)sender;
+- (void)onStickOnText:(id)sender;
+- (void)onStickOnPdf:(id)sender;
+- (void)onMaskingTape:(id)sender;
+- (void)onRemoveMasking:(id)sender;
+- (void)onRememberLast:(id)sender;
+- (void)onPlayback:(id)sender;
+- (void)onPreferences:(id)sender;
+@end
+
+@implementation ImposeControlPanelDelegate
+- (void)onBooklet:(id)sender     { ExecuteBooklet(nil); }
+- (void)onNUp:(id)sender         { ExecuteNUpPages(nil); }
+- (void)onStepRepeat:(id)sender  { ExecuteStepAndRepeat(nil); }
+- (void)onJoin2Pages:(id)sender  { ExecuteJoin2Pages(nil); }
+- (void)onShufflePages:(id)sender{ ExecuteShufflePages(nil); }
+- (void)onReversePages:(id)sender{ ExecuteReversePages(nil); }
+- (void)onTrimShift:(id)sender   { ExecuteTrimShift(nil); }
+- (void)onInsertPages:(id)sender { ExecuteInsertPages(nil); }
+- (void)onTilePages:(id)sender   { ExecuteTilePages(nil); }
+- (void)onPageTools:(id)sender   { ExecutePageTools(nil); }
+- (void)onStickOnText:(id)sender { ExecuteStickOnText(nil); }
+- (void)onStickOnPdf:(id)sender  { ExecuteStickOnPdf(nil); }
+- (void)onMaskingTape:(id)sender { ExecuteStickOnMasking(nil); }
+- (void)onRemoveMasking:(id)sender{ExecutePeelOffMasking(nil); }
+- (void)onRememberLast:(id)sender{ ExecuteRememberLast(nil); }
+- (void)onPlayback:(id)sender    { ExecutePlayback(nil); }
+- (void)onPreferences:(id)sender { ExecutePreferences(nil); }
+@end
+
+static ImposeControlPanelDelegate* gPanelDelegate = nil;
+static NSPanel* gControlPanel = nil;
+
+static NSButton* MakePanelButton(NSString* title, id target, SEL action, NSRect frame) {
+    NSButton* btn = [[NSButton alloc] initWithFrame:frame];
+    [btn setTitle:title];
+    [btn setBezelStyle:NSBezelStyleRounded];
+    [btn setTarget:target];
+    [btn setAction:action];
+    return btn;
+}
+
+static NSBox* MakeGroup(NSString* title, NSRect frame) {
+    NSBox* box = [[NSBox alloc] initWithFrame:frame];
+    [box setTitle:title];
+    [box setTitlePosition:NSAtTop];
+    [box setBoxType:NSBoxPrimary];
+    return box;
+}
+
+static void BuildControlPanelContent(NSView* tabView, ImposeControlPanelDelegate* del) {
+    const CGFloat BW = 100, BH = 24, BG = 4;
+    const CGFloat GW = 230, GM = 8;
+
+    // Easy Imposition group
+    NSBox* grpEasy = MakeGroup(@"Easy Imposition", NSMakeRect(GM, 470, GW, 100));
+    [grpEasy addSubview:MakePanelButton(@"Booklet", del, @selector(onBooklet:),
+        NSMakeRect(GM, 44, BW, BH))];
+    [grpEasy addSubview:MakePanelButton(@"N-up pages", del, @selector(onNUp:),
+        NSMakeRect(BW+GM+BG, 44, BW, BH))];
+    [grpEasy addSubview:MakePanelButton(@"Step & repeat", del, @selector(onStepRepeat:),
+        NSMakeRect(GM, 14, BW, BH))];
+    [grpEasy addSubview:MakePanelButton(@"Join 2 pages", del, @selector(onJoin2Pages:),
+        NSMakeRect(BW+GM+BG, 14, BW, BH))];
+
+    // Page Management group
+    NSBox* grpPages = MakeGroup(@"Page Management", NSMakeRect(GM, 310, GW, 150));
+    [grpPages addSubview:MakePanelButton(@"Shuffle pages", del, @selector(onShufflePages:),
+        NSMakeRect(GM, 104, BW, BH))];
+    [grpPages addSubview:MakePanelButton(@"Reverse pages", del, @selector(onReversePages:),
+        NSMakeRect(BW+GM+BG, 104, BW, BH))];
+    [grpPages addSubview:MakePanelButton(@"Trim & shift", del, @selector(onTrimShift:),
+        NSMakeRect(GM, 74, BW, BH))];
+    [grpPages addSubview:MakePanelButton(@"Insert pages", del, @selector(onInsertPages:),
+        NSMakeRect(BW+GM+BG, 74, BW, BH))];
+    [grpPages addSubview:MakePanelButton(@"Tile pages", del, @selector(onTilePages:),
+        NSMakeRect(GM, 44, BW, BH))];
+    [grpPages addSubview:MakePanelButton(@"Page tools", del, @selector(onPageTools:),
+        NSMakeRect(BW+GM+BG, 44, BW, BH))];
+
+    // Stick On group
+    NSBox* grpStick = MakeGroup(@"Stick On", NSMakeRect(GM, 200, GW, 100));
+    [grpStick addSubview:MakePanelButton(@"Text & numbers", del, @selector(onStickOnText:),
+        NSMakeRect(GM, 44, BW, BH))];
+    [grpStick addSubview:MakePanelButton(@"PDF pages", del, @selector(onStickOnPdf:),
+        NSMakeRect(BW+GM+BG, 44, BW, BH))];
+    [grpStick addSubview:MakePanelButton(@"Masking tape", del, @selector(onMaskingTape:),
+        NSMakeRect(GM, 14, BW, BH))];
+    [grpStick addSubview:MakePanelButton(@"Remove overlays", del, @selector(onRemoveMasking:),
+        NSMakeRect(BW+GM+BG, 14, BW, BH))];
+
+    // Memory group
+    NSBox* grpMem = MakeGroup(@"Memory", NSMakeRect(GM, 120, GW, 70));
+    [grpMem addSubview:MakePanelButton(@"Remember last", del, @selector(onRememberLast:),
+        NSMakeRect(GM, 14, BW, BH))];
+    [grpMem addSubview:MakePanelButton(@"Playback", del, @selector(onPlayback:),
+        NSMakeRect(BW+GM+BG, 14, BW, BH))];
+
+    // Settings group
+    NSBox* grpSet = MakeGroup(@"Settings / Help", NSMakeRect(GM, 50, GW, 60));
+    [grpSet addSubview:MakePanelButton(@"Preferences", del, @selector(onPreferences:),
+        NSMakeRect(GM, 14, BW, BH))];
+
+    [tabView addSubview:grpEasy];
+    [tabView addSubview:grpPages];
+    [tabView addSubview:grpStick];
+    [tabView addSubview:grpMem];
+    [tabView addSubview:grpSet];
+}
+
+static void ShowControlPanel() {
+    if (!gPanelDelegate) {
+        gPanelDelegate = [[ImposeControlPanelDelegate alloc] init];
+    }
+    if (!gControlPanel) {
+        const NSRect frame = NSMakeRect(100, 200, 260, 610);
+        gControlPanel = [[NSPanel alloc]
+            initWithContentRect:frame
+                      styleMask:(NSWindowStyleMaskTitled |
+                                 NSWindowStyleMaskClosable |
+                                 NSWindowStyleMaskMiniaturizable |
+                                 NSWindowStyleMaskUtilityWindow)
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        [gControlPanel setTitle:@"Imposition Control Panel"];
+        [gControlPanel setFloatingPanel:YES];
+        [gControlPanel setLevel:NSFloatingWindowLevel];
+        [gControlPanel setBecomesKeyOnlyIfNeeded:YES];
+
+        NSView* content = [gControlPanel contentView];
+        NSTabView* tabs = [[NSTabView alloc]
+            initWithFrame:NSMakeRect(0, 0, 260, 590)];
+
+        NSTabViewItem* controlTab = [[NSTabViewItem alloc] initWithIdentifier:@"control"];
+        [controlTab setLabel:@"Control"];
+        NSView* controlView = [[NSView alloc] initWithFrame:NSMakeRect(0,0,250,570)];
+        BuildControlPanelContent(controlView, gPanelDelegate);
+        [controlTab setView:controlView];
+
+        NSTabViewItem* seqTab = [[NSTabViewItem alloc] initWithIdentifier:@"sequences"];
+        [seqTab setLabel:@"Sequences"];
+        NSView* seqView = [[NSView alloc] initWithFrame:NSMakeRect(0,0,250,570)];
+        NSTextField* seqLbl = [[NSTextField alloc] initWithFrame:NSMakeRect(20,260,210,40)];
+        [seqLbl setStringValue:@"Sequences manager — use Imposition > Automation > Sequences…"];
+        [seqLbl setBezeled:NO];
+        [seqLbl setDrawsBackground:NO];
+        [seqLbl setEditable:NO];
+        [seqLbl setSelectable:NO];
+        [seqLbl setLineBreakMode:NSLineBreakByWordWrapping];
+        [seqView addSubview:seqLbl];
+        [seqTab setView:seqView];
+
+        NSTabViewItem* infoTab = [[NSTabViewItem alloc] initWithIdentifier:@"info"];
+        [infoTab setLabel:@"Info"];
+        NSView* infoView = [[NSView alloc] initWithFrame:NSMakeRect(0,0,250,570)];
+        NSTextField* infoLbl = [[NSTextField alloc] initWithFrame:NSMakeRect(20,260,210,40)];
+        [infoLbl setStringValue:@"Info tab — run an imposition to see layout details here."];
+        [infoLbl setBezeled:NO];
+        [infoLbl setDrawsBackground:NO];
+        [infoLbl setEditable:NO];
+        [infoLbl setSelectable:NO];
+        [infoLbl setLineBreakMode:NSLineBreakByWordWrapping];
+        [infoView addSubview:infoLbl];
+        [infoTab setView:infoView];
+
+        NSTabViewItem* manualTab = [[NSTabViewItem alloc] initWithIdentifier:@"manual"];
+        [manualTab setLabel:@"Manual"];
+        NSView* manualView = [[NSView alloc] initWithFrame:NSMakeRect(0,0,250,570)];
+        NSTextField* manualLbl = [[NSTextField alloc] initWithFrame:NSMakeRect(20,260,210,40)];
+        [manualLbl setStringValue:@"Manual imposition — drag pages onto sheets."];
+        [manualLbl setBezeled:NO];
+        [manualLbl setDrawsBackground:NO];
+        [manualLbl setEditable:NO];
+        [manualLbl setSelectable:NO];
+        [manualLbl setLineBreakMode:NSLineBreakByWordWrapping];
+        [manualView addSubview:manualLbl];
+        [manualTab setView:manualView];
+
+        [tabs addTabViewItem:controlTab];
+        [tabs addTabViewItem:seqTab];
+        [tabs addTabViewItem:infoTab];
+        [tabs addTabViewItem:manualTab];
+        [content addSubview:tabs];
+    }
+    [gControlPanel makeKeyAndOrderFront:nil];
+    [gControlPanel orderFrontRegardless];
+}
+#endif // MAC_PLATFORM
+
+// ── Re-open namespace for plugin body ─────────────────────────────────────────
+
+namespace {
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+constexpr const char* kExtensionName    = "AcrobatImpositionPlugin";
+constexpr const char* kMenuName         = "Imposition";
+
+// Section: Control
+constexpr const char* kMI_ControlPanel      = "Imposition Control Panel\xE2\x80\xA6";
+// Section: Easy Imposition
+constexpr const char* kMI_Booklet           = "Booklet\xE2\x80\xA6";
+constexpr const char* kMI_NUpPages          = "N-up pages\xE2\x80\xA6";
+constexpr const char* kMI_StepRepeat        = "Step & repeat\xE2\x80\xA6";
+constexpr const char* kMI_Join2Pages        = "Join 2 pages\xE2\x80\xA6";
+// Section: Page Management
+constexpr const char* kMI_ShufflePages      = "Shuffle pages\xE2\x80\xA6";
+constexpr const char* kMI_ShuffleEvenOdd    = "Shuffle even/odd\xE2\x80\xA6";
+constexpr const char* kMI_ReversePages      = "Reverse pages";
+constexpr const char* kMI_InsertPages       = "Insert pages\xE2\x80\xA6";
+constexpr const char* kMI_TrimShift         = "Trim & shift\xE2\x80\xA6";
+constexpr const char* kMI_TilePages         = "Tile pages\xE2\x80\xA6";
+constexpr const char* kMI_PageSizes         = "Page sizes\xE2\x80\xA6";
+constexpr const char* kMI_PageTools         = "Page tools\xE2\x80\xA6";
+// Section: Advanced
+constexpr const char* kMI_Creep             = "Creep\xE2\x80\xA6";
+constexpr const char* kMI_SampleDocument    = "Sample document\xE2\x80\xA6";
+constexpr const char* kMI_Monitor           = "Monitor\xE2\x80\xA6";
+// Section: Stick On
+constexpr const char* kMI_StickText         = "Text & numbers\xE2\x80\xA6";
+constexpr const char* kMI_StickPdf          = "PDF pages\xE2\x80\xA6";
+constexpr const char* kMI_StickMasking      = "Masking tape\xE2\x80\xA6";
+// Section: Peel Off
+constexpr const char* kMI_PeelText          = "Text & numbers\xE2\x80\xA6";
+constexpr const char* kMI_PeelMasking       = "Masking tape\xE2\x80\xA6";
+constexpr const char* kMI_RegMarks          = "Registration marks\xE2\x80\xA6";
+// Section: Automation
+constexpr const char* kMI_Sequences         = "Sequences\xE2\x80\xA6";
+constexpr const char* kMI_Playback          = "Playback";
+constexpr const char* kMI_RememberLast      = "Remember last";
+// Section: Settings
+constexpr const char* kMI_Preferences       = "Preferences\xE2\x80\xA6";
+constexpr const char* kMI_CustomizePanel    = "Customize panel\xE2\x80\xA6";
+constexpr const char* kMI_HelpAbout         = "Help / About";
+
+// ── Global menu handles ───────────────────────────────────────────────────────
+
+AVMenu   gImpositionMenu        = nullptr;
+AVMenuItem gMI_ControlPanel     = nullptr;
+AVMenuItem gMI_Booklet          = nullptr;
+AVMenuItem gMI_NUpPages         = nullptr;
+AVMenuItem gMI_StepRepeat       = nullptr;
+AVMenuItem gMI_Join2Pages       = nullptr;
+AVMenuItem gMI_ShufflePages     = nullptr;
+AVMenuItem gMI_ShuffleEvenOdd   = nullptr;
+AVMenuItem gMI_ReversePages     = nullptr;
+AVMenuItem gMI_InsertPages      = nullptr;
+AVMenuItem gMI_TrimShift        = nullptr;
+AVMenuItem gMI_TilePages        = nullptr;
+AVMenuItem gMI_PageSizes        = nullptr;
+AVMenuItem gMI_PageTools        = nullptr;
+AVMenuItem gMI_Creep            = nullptr;
+AVMenuItem gMI_SampleDocument   = nullptr;
+AVMenuItem gMI_Monitor          = nullptr;
+AVMenuItem gMI_StickText        = nullptr;
+AVMenuItem gMI_StickPdf         = nullptr;
+AVMenuItem gMI_StickMasking     = nullptr;
+AVMenuItem gMI_PeelText         = nullptr;
+AVMenuItem gMI_PeelMasking      = nullptr;
+AVMenuItem gMI_RegMarks         = nullptr;
+AVMenuItem gMI_Sequences        = nullptr;
+AVMenuItem gMI_Playback         = nullptr;
+AVMenuItem gMI_RememberLast     = nullptr;
+AVMenuItem gMI_Preferences      = nullptr;
+AVMenuItem gMI_CustomizePanel   = nullptr;
+AVMenuItem gMI_HelpAbout        = nullptr;
+
+// Procs
+AVExecuteProc gProc_ControlPanel    = nullptr;
+AVExecuteProc gProc_Booklet         = nullptr;
+AVExecuteProc gProc_NUpPages        = nullptr;
+AVExecuteProc gProc_StepRepeat      = nullptr;
+AVExecuteProc gProc_Join2Pages      = nullptr;
+AVExecuteProc gProc_ShufflePages    = nullptr;
+AVExecuteProc gProc_ShuffleEvenOdd  = nullptr;
+AVExecuteProc gProc_ReversePages    = nullptr;
+AVExecuteProc gProc_InsertPages     = nullptr;
+AVExecuteProc gProc_TrimShift       = nullptr;
+AVExecuteProc gProc_TilePages       = nullptr;
+AVExecuteProc gProc_PageSizes       = nullptr;
+AVExecuteProc gProc_PageTools       = nullptr;
+AVExecuteProc gProc_Creep           = nullptr;
+AVExecuteProc gProc_SampleDocument  = nullptr;
+AVExecuteProc gProc_Monitor         = nullptr;
+AVExecuteProc gProc_StickText       = nullptr;
+AVExecuteProc gProc_StickPdf        = nullptr;
+AVExecuteProc gProc_StickMasking    = nullptr;
+AVExecuteProc gProc_PeelText        = nullptr;
+AVExecuteProc gProc_PeelMasking     = nullptr;
+AVExecuteProc gProc_RegMarks        = nullptr;
+AVExecuteProc gProc_Sequences       = nullptr;
+AVExecuteProc gProc_Playback        = nullptr;
+AVExecuteProc gProc_RememberLast    = nullptr;
+AVExecuteProc gProc_Preferences     = nullptr;
+AVExecuteProc gProc_CustomizePanel  = nullptr;
+AVExecuteProc gProc_HelpAbout       = nullptr;
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 std::string BuildUtcTimestamp() {
     const auto now = std::chrono::system_clock::now();
-    const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    const std::time_t t = std::chrono::system_clock::to_time_t(now);
     std::tm utc {};
 #if defined(_WIN32)
-    gmtime_s(&utc, &nowTime);
+    gmtime_s(&utc, &t);
 #else
-    gmtime_r(&nowTime, &utc);
+    gmtime_r(&t, &utc);
 #endif
     std::ostringstream out;
     out << std::put_time(&utc, "%Y%m%d-%H%M%SZ");
@@ -124,721 +393,40 @@ std::string BuildUtcTimestamp() {
 
 std::string GetPresetPath() {
     std::error_code ec;
-    const auto tempDir = std::filesystem::temp_directory_path(ec);
-    if (ec) {
-        return "acrobat-imposition-plugin.preset.txt";
-    }
-    return (tempDir / "acrobat-imposition-plugin.preset.txt").string();
+    const auto tmp = std::filesystem::temp_directory_path(ec);
+    if (ec) return "acrobat-imposition-plugin.preset.txt";
+    return (tmp / "acrobat-imposition-plugin.preset.txt").string();
 }
 
-bool BuildPlanFromPreset(const aimp::PlannerPreset& preset,
-                         std::uint32_t pageCount,
-                         aimp::ImpositionPlan& outPlan,
-                         std::string& modeLabel) {
-    const aimp::SheetSize sheet = preset.sheetSize.widthPoints > 0.0 && preset.sheetSize.heightPoints > 0.0
-        ? preset.sheetSize
-        : aimp::SheetSize {1190.55, 841.89};
-
-    if (preset.columns >= 1 && preset.rows >= 1 && (preset.columns > 1 || preset.rows > 1)) {
-        modeLabel = "n-up";
-        outPlan = aimp::NUpPlanner::Build("active-document", pageCount, sheet, preset.columns, preset.rows, preset.buildOptions);
-        return true;
-    }
-
-    modeLabel = "two-up";
-    outPlan = aimp::TwoUpPlanner::Build("active-document", pageCount, sheet, preset.buildOptions);
-    return true;
-}
-
-bool BuildDefaultPreset(aimp::PlannerPreset& preset) {
-    preset = aimp::PlannerPreset {};
-    preset.sheetSize = {1190.55, 841.89};
-    preset.columns = 2;
-    preset.rows = 1;
-    preset.buildOptions.scaleToFit = true;
-    preset.buildOptions.autoRotateToFit = true;
-    preset.pdfOptions.drawTrimMarks = true;
-    preset.pdfOptions.drawBleedBox = true;
-    preset.pdfOptions.bleedPoints = 6.0;
-    preset.pdfOptions.targetPdfxProfile = aimp::PdfxProfile::Pdfx4;
-    preset.pdfOptions.failOnValidationIssues = true;
-    preset.pdfOptions.failOnPreflightErrors = true;
-    preset.outputStem = "acrobat-imposition-run";
-    return true;
-}
-
-void ShowInfoDialog(const std::string& message) {
-    AVAlertNote(message.c_str());
-}
-
-std::string BuildPanelStateJson(const std::string& modeLabel,
-                                const aimp::PlannerPreset& preset,
-                                std::size_t validationIssueCount,
-                                std::size_t preflightIssueCount,
-                                std::size_t preflightErrorCount,
-                                const std::string& bundlePath,
-                                const std::string& proofPath,
-                                const std::string& imposedOutputPath) {
-    std::ostringstream out;
-    out << "{\n";
-    out << "  \"kind\": \"acrobat-imposition-panel-state\",\n";
-    out << "  \"mode\": \"" << modeLabel << "\",\n";
-    out << "  \"sheet\": {\"widthPoints\": " << preset.sheetSize.widthPoints
-        << ", \"heightPoints\": " << preset.sheetSize.heightPoints << "},\n";
-    out << "  \"preset\": {\n";
-    out << "    \"columns\": " << preset.columns << ",\n";
-    out << "    \"rows\": " << preset.rows << ",\n";
-    out << "    \"fitToSlot\": " << (preset.buildOptions.scaleToFit ? "true" : "false") << ",\n";
-    out << "    \"autoRotateToFit\": " << (preset.buildOptions.autoRotateToFit ? "true" : "false") << ",\n";
-    out << "    \"reverseOrder\": " << (preset.buildOptions.reverseOrder ? "true" : "false") << ",\n";
-    out << "    \"filter\": \"" << aimp::PanelStateFilterName(preset.buildOptions.filter) << "\",\n";
-    out << "    \"bookletCreepPerSheetPoints\": " << preset.buildOptions.bookletCreepPerSheetPoints << ",\n";
-    out << "    \"outputDirectory\": \"" << preset.outputDirectory << "\",\n";
-    out << "    \"outputStem\": \"" << preset.outputStem << "\",\n";
-    out << "    \"drawTrimMarks\": " << (preset.pdfOptions.drawTrimMarks ? "true" : "false") << ",\n";
-    out << "    \"trimMarkLengthPoints\": " << preset.pdfOptions.trimMarkLengthPoints << ",\n";
-    out << "    \"trimMarkOffsetPoints\": " << preset.pdfOptions.trimMarkOffsetPoints << ",\n";
-    out << "    \"drawBleedBox\": " << (preset.pdfOptions.drawBleedBox ? "true" : "false") << ",\n";
-    out << "    \"bleedPoints\": " << preset.pdfOptions.bleedPoints << ",\n";
-    out << "    \"pdfxProfile\": \"" << aimp::PdfxProfileName(preset.pdfOptions.targetPdfxProfile) << "\",\n";
-    out << "    \"failOnValidationIssues\": " << (preset.pdfOptions.failOnValidationIssues ? "true" : "false") << ",\n";
-    out << "    \"failOnPreflightErrors\": " << (preset.pdfOptions.failOnPreflightErrors ? "true" : "false") << "\n";
-    out << "  },\n";
-    out << "  \"validation\": {\n";
-    out << "    \"validationIssueCount\": " << validationIssueCount << ",\n";
-    out << "    \"preflightIssueCount\": " << preflightIssueCount << ",\n";
-    out << "    \"preflightErrorCount\": " << preflightErrorCount << ",\n";
-    out << "    \"status\": \"" << ((validationIssueCount == 0 && preflightErrorCount == 0) ? "ready" : "blocked") << "\"\n";
-    out << "  },\n";
-    out << "  \"bundlePath\": \"" << bundlePath << "\",\n";
-    out << "  \"outputs\": {\n";
-    out << "    \"proofPdf\": \"" << proofPath << "\",\n";
-    out << "    \"imposedOutputPdf\": \"" << imposedOutputPath << "\"\n";
-    out << "  },\n";
-    out << "  \"quickActions\": {\n";
-    out << "    \"cycleLayout\": \"Panel: Cycle layout\",\n";
-    out << "    \"toggleTrimBleed\": \"Panel: Toggle trim+bleed\",\n";
-    out << "    \"toggleQualityGate\": \"Panel: Toggle quality gate\",\n";
-    out << "    \"sheetA4\": \"Panel: Sheet A4\",\n";
-    out << "    \"sheetA3\": \"Panel: Sheet A3\",\n";
-    out << "    \"setOutputTemp\": \"Panel: Set output temp\",\n";
-    out << "    \"showState\": \"Panel: Show state\",\n";
-    out << "    \"applyState\": \"Panel: Apply state\"\n";
-    out << "  }\n";
-    out << "}\n";
-    return out.str();
-}
-
-std::string GetPanelStatePath() {
+std::string GetLastActionPath() {
     std::error_code ec;
-    const auto tempDir = std::filesystem::temp_directory_path(ec);
-    if (ec) {
-        return "acrobat-imposition-panel-state.json";
-    }
-    return (tempDir / "acrobat-imposition-panel-state.json").string();
+    const auto tmp = std::filesystem::temp_directory_path(ec);
+    if (ec) return "aimp-last-action.json";
+    return (tmp / "aimp-last-action.json").string();
 }
 
-bool SavePanelState(const std::string& modeLabel,
-                    const aimp::PlannerPreset& preset,
-                    std::size_t validationIssueCount,
-                    std::size_t preflightIssueCount,
-                    std::size_t preflightErrorCount,
-                    const std::string& bundlePath,
-                    const std::string& proofPath,
-                    const std::string& imposedOutputPath,
-                    std::string& outPath) {
-    outPath = GetPanelStatePath();
-    std::ofstream out(outPath);
-    if (!out) {
-        return false;
-    }
-    out << BuildPanelStateJson(modeLabel,
-                               preset,
-                               validationIssueCount,
-                               preflightIssueCount,
-                               preflightErrorCount,
-                               bundlePath,
-                               proofPath,
-                               imposedOutputPath);
+void ShowInfoDialog(const std::string& msg) {
+    AVAlertNote(msg.c_str());
+}
+
+bool BuildDefaultPreset(aimp::PlannerPreset& p) {
+    p = {};
+    p.sheetSize = {1190.55, 841.89};
+    p.columns = 2;
+    p.rows = 1;
+    p.buildOptions.scaleToFit = true;
+    p.buildOptions.autoRotateToFit = true;
+    p.pdfOptions.drawTrimMarks = false;
+    p.pdfOptions.drawBleedBox = false;
+    p.pdfOptions.bleedPoints = 0.0;
+    p.outputStem = "imposr-output";
     return true;
 }
 
-std::string BuildPanelDialogSchemaJson() {
-    std::ostringstream out;
-    out << "{\n";
-    out << "  \"kind\": \"acrobat-imposition-panel-dialog-schema\",\n";
-    out << "  \"sections\": [\n";
-    out << "    {\n";
-    out << "      \"id\": \"layout\",\n";
-    out << "      \"label\": \"Layout\",\n";
-    out << "      \"controls\": [\n";
-    out << "        {\"id\": \"mode\", \"type\": \"select\", \"options\": [\"two-up\", \"n-up\"]},\n";
-    out << "        {\"id\": \"columns\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"rows\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"fitToSlot\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"autoRotateToFit\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"reverseOrder\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"filter\", \"type\": \"select\", \"options\": [\"all\", \"even\", \"odd\"]},\n";
-    out << "        {\"id\": \"bookletCreepPerSheetPoints\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"sheet.widthPoints\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"sheet.heightPoints\", \"type\": \"number\"}\n";
-    out << "      ]\n";
-    out << "    },\n";
-    out << "    {\n";
-    out << "      \"id\": \"prepress\",\n";
-    out << "      \"label\": \"Prepress\",\n";
-    out << "      \"controls\": [\n";
-    out << "        {\"id\": \"drawTrimMarks\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"trimMarkLengthPoints\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"trimMarkOffsetPoints\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"drawBleedBox\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"bleedPoints\", \"type\": \"number\"},\n";
-    out << "        {\"id\": \"pdfxProfile\", \"type\": \"select\", \"options\": [\"none\", \"pdfx-1a\", \"pdfx-4\"]}\n";
-    out << "      ]\n";
-    out << "    },\n";
-    out << "    {\n";
-    out << "      \"id\": \"quality\",\n";
-    out << "      \"label\": \"Quality Gates\",\n";
-    out << "      \"controls\": [\n";
-    out << "        {\"id\": \"failOnValidationIssues\", \"type\": \"boolean\"},\n";
-    out << "        {\"id\": \"failOnPreflightErrors\", \"type\": \"boolean\"}\n";
-    out << "      ]\n";
-    out << "    },\n";
-    out << "    {\n";
-    out << "      \"id\": \"output\",\n";
-    out << "      \"label\": \"Output\",\n";
-    out << "      \"controls\": [\n";
-    out << "        {\"id\": \"outputDirectory\", \"type\": \"string\"},\n";
-    out << "        {\"id\": \"outputStem\", \"type\": \"string\"}\n";
-    out << "      ]\n";
-    out << "    }\n";
-    out << "  ]\n";
-    out << "}\n";
-    return out.str();
-}
-
-std::string BuildPanelControlSurfaceJson(const aimp::PlannerPreset& preset) {
-    std::ostringstream out;
-    out << "{\n";
-    out << "  \"kind\": \"acrobat-imposition-control-surface\",\n";
-    out << "  \"version\": 1,\n";
-    out << "  \"defaultState\": {\n";
-    out << "    \"columns\": " << preset.columns << ",\n";
-    out << "    \"rows\": " << preset.rows << ",\n";
-    out << "    \"sheetWidthPoints\": " << preset.sheetSize.widthPoints << ",\n";
-    out << "    \"sheetHeightPoints\": " << preset.sheetSize.heightPoints << ",\n";
-    out << "    \"outputDirectory\": \"" << preset.outputDirectory << "\",\n";
-    out << "    \"outputStem\": \"" << preset.outputStem << "\"\n";
-    out << "  },\n";
-    out << "  \"actions\": [\n";
-    out << "    {\"id\": \"validate\", \"menu\": \"Preset: Validate active job\"},\n";
-    out << "    {\"id\": \"preview\", \"menu\": \"Preset: Preview proof\"},\n";
-    out << "    {\"id\": \"runBundle\", \"menu\": \"Preset: Run bundle\"},\n";
-    out << "    {\"id\": \"applyState\", \"menu\": \"Panel: Apply state\"},\n";
-    out << "    {\"id\": \"openDialog\", \"menu\": \"Panel: Open unified dialog\"}\n";
-    out << "  ],\n";
-    out << "  \"qualityGates\": {\n";
-    out << "    \"failOnValidationIssues\": " << (preset.pdfOptions.failOnValidationIssues ? "true" : "false") << ",\n";
-    out << "    \"failOnPreflightErrors\": " << (preset.pdfOptions.failOnPreflightErrors ? "true" : "false") << "\n";
-    out << "  }\n";
-    out << "}\n";
-    return out.str();
-}
-
-std::string BuildPanelDialogHtml(const std::string& statePath,
-                                 const std::string& schemaPath,
-                                 const std::string& stateJson,
-                                 const std::string& schemaJson) {
-    const auto escapeJs = [](const std::string& text) {
-        std::string out;
-        out.reserve(text.size() + 16);
-        for (char ch : text) {
-            if (ch == '\\' || ch == '\'' || ch == '"') {
-                out.push_back('\\');
-            }
-            if (ch == '\n') {
-                out += "\\n";
-                continue;
-            }
-            if (ch == '\r') {
-                out += "\\r";
-                continue;
-            }
-            out.push_back(ch);
-        }
-        return out;
-    };
-    std::ostringstream out;
-    out << "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Create booklet - aligning pages</title>";
-    out << "<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#f3f3f3;}h1{font-size:20px;margin:0 0 10px;}"
-        << "code{background:#f4f4f4;padding:2px 4px;} .wizard{background:#fff;border:1px solid #a9a9a9;max-width:860px;padding:16px;}"
-        << ".step{display:none;} .step.active{display:block;} .card{border:1px solid #ddd;padding:12px;margin:10px 0;background:#fff;}"
-        << ".option{display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid #ddd;margin:8px 0;background:#fafafa;}"
-        << ".preview-wrap{display:flex;gap:14px;justify-content:center;margin-top:16px;}"
-        << ".sheet{width:140px;height:190px;border:1px solid #777;background:#fefefe;display:flex;align-items:center;justify-content:center;}"
-        << ".half{width:90px;height:130px;border:1px solid #555;background:#ddd;display:flex;align-items:center;justify-content:center;font-size:64px;font-weight:700;}"
-        << "label{display:block;font-weight:bold;margin-top:8px;} input,select{width:100%;max-width:420px;padding:6px;margin-top:2px;}"
-        << ".wizard-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;} button{padding:8px 12px;}</style>";
-    out << "</head><body>";
-    out << "<div class='wizard'><h1>Create booklet - aligning pages</h1>";
-    out << "<div class='card'><p>State JSON: <code>" << statePath << "</code></p>";
-    out << "<p>Schema JSON: <code>" << schemaPath << "</code></p></div>";
-    out << "<div id='step-1' class='step active'>";
-    out << "<p>When pages don't fit exactly, choose how pages are aligned in each half of the sheet.</p>";
-    out << "<label class='option'><input type='radio' name='alignMode' value='center_page' checked/>"
-        << "<span><b>1.</b> Centre each page in its half (recommended).</span></label>";
-    out << "<label class='option'><input type='radio' name='alignMode' value='center_column'/>"
-        << "<span><b>2.</b> Centre pages from top to bottom and pull towards sheet centre.</span></label>";
-    out << "<label class='option'><input type='radio' name='alignMode' value='bottom_left'/>"
-        << "<span><b>3.</b> Push each page to bottom-left of its half.</span></label>";
-    out << "<div class='preview-wrap'><div class='sheet'><div class='half'>L</div></div><div class='sheet'><div class='half'>R</div></div></div>";
-    out << "</div>";
-    out << "<div id='step-2' class='step'><div class='card'><h2>Advanced controls</h2>"
-        << "<label>Mode<select id='mode'><option>two-up</option><option>n-up</option></select></label>"
-        << "<label>Columns<input id='columns' type='number' min='1'/></label>"
-        << "<label>Rows<input id='rows' type='number' min='1'/></label>"
-        << "<label><input id='fitToSlot' type='checkbox'/> Fit to slot</label>"
-        << "<label><input id='autoRotateToFit' type='checkbox'/> Auto rotate to fit</label>"
-        << "<label><input id='reverseOrder' type='checkbox'/> Reverse order</label>"
-        << "<label>Filter<select id='filter'><option>all</option><option>even</option><option>odd</option></select></label>"
-        << "<label>Booklet creep per sheet (pt)<input id='bookletCreepPerSheetPoints' type='number' step='0.01'/></label>"
-        << "<label>Sheet width (pt)<input id='sheetWidth' type='number' step='0.01'/></label>"
-        << "<label>Sheet height (pt)<input id='sheetHeight' type='number' step='0.01'/></label>"
-        << "<label>Output directory<input id='outputDirectory' type='text'/></label>"
-        << "<label>Output stem<input id='outputStem' type='text'/></label>"
-        << "<label>Trim mark length (pt)<input id='trimMarkLengthPoints' type='number' step='0.01'/></label>"
-        << "<label>Trim mark offset (pt)<input id='trimMarkOffsetPoints' type='number' step='0.01'/></label>"
-        << "<label>Bleed points<input id='bleedPoints' type='number' step='0.01'/></label>"
-        << "<label>PDF/X profile<select id='pdfxProfile'><option>none</option><option>pdfx-1a</option><option>pdfx-4</option></select></label>"
-        << "<label><input id='drawTrimMarks' type='checkbox'/> Draw trim marks</label>"
-        << "<label><input id='drawBleedBox' type='checkbox'/> Draw bleed box</label>"
-        << "<label><input id='failOnValidationIssues' type='checkbox'/> Fail on validation issues</label>"
-        << "<label><input id='failOnPreflightErrors' type='checkbox'/> Fail on preflight errors</label>"
-        << "<button onclick='exportState()'>Export edited panel-state JSON</button>"
-        << "<pre id='output'></pre></div></div>";
-    out << "<div class='wizard-footer'>"
-        << "<button id='btnBack' onclick='prevStep()'>Back</button>"
-        << "<button id='btnNext' onclick='nextStep()'>Next</button>"
-        << "<button id='btnFinish' onclick='exportState()'>Finish</button>"
-        << "<button onclick='cancelWizard()'>Cancel</button></div></div>";
-    out << "<script>\n";
-    out << "const panelState = JSON.parse('" << escapeJs(stateJson) << "');\n";
-    out << "const panelSchema = JSON.parse('" << escapeJs(schemaJson) << "');\n";
-    out << "let wizardStep = 1;\n";
-    out << "function showStep(){\n";
-    out << "document.getElementById('step-1').classList.toggle('active', wizardStep === 1);\n";
-    out << "document.getElementById('step-2').classList.toggle('active', wizardStep === 2);\n";
-    out << "document.getElementById('btnBack').disabled = wizardStep === 1;\n";
-    out << "document.getElementById('btnNext').style.display = wizardStep === 2 ? 'none' : 'inline-block';\n";
-    out << "document.getElementById('btnFinish').style.display = wizardStep === 2 ? 'inline-block' : 'none';\n";
-    out << "}\n";
-    out << "function nextStep(){wizardStep = Math.min(2, wizardStep + 1); showStep();}\n";
-    out << "function prevStep(){wizardStep = Math.max(1, wizardStep - 1); showStep();}\n";
-    out << "function cancelWizard(){document.getElementById('output').textContent='Wizard cancelled.';}\n";
-    out << "function setValues(){\n";
-    out << "document.getElementById('mode').value = panelState.mode || 'two-up';\n";
-    out << "document.getElementById('columns').value = panelState.preset.columns || 2;\n";
-    out << "document.getElementById('rows').value = panelState.preset.rows || 1;\n";
-    out << "document.getElementById('fitToSlot').checked = !!panelState.preset.fitToSlot;\n";
-    out << "document.getElementById('autoRotateToFit').checked = !!panelState.preset.autoRotateToFit;\n";
-    out << "document.getElementById('reverseOrder').checked = !!panelState.preset.reverseOrder;\n";
-    out << "document.getElementById('filter').value = panelState.preset.filter || 'all';\n";
-    out << "document.getElementById('bookletCreepPerSheetPoints').value = panelState.preset.bookletCreepPerSheetPoints || 0;\n";
-    out << "document.getElementById('sheetWidth').value = panelState.sheet.widthPoints || 0;\n";
-    out << "document.getElementById('sheetHeight').value = panelState.sheet.heightPoints || 0;\n";
-    out << "document.getElementById('outputDirectory').value = panelState.preset.outputDirectory || '';\n";
-    out << "document.getElementById('outputStem').value = panelState.preset.outputStem || '';\n";
-    out << "document.getElementById('trimMarkLengthPoints').value = panelState.preset.trimMarkLengthPoints || 12;\n";
-    out << "document.getElementById('trimMarkOffsetPoints').value = panelState.preset.trimMarkOffsetPoints || 6;\n";
-    out << "document.getElementById('bleedPoints').value = panelState.preset.bleedPoints || 0;\n";
-    out << "document.getElementById('pdfxProfile').value = panelState.preset.pdfxProfile || 'none';\n";
-    out << "document.getElementById('drawTrimMarks').checked = !!panelState.preset.drawTrimMarks;\n";
-    out << "document.getElementById('drawBleedBox').checked = !!panelState.preset.drawBleedBox;\n";
-    out << "document.getElementById('failOnValidationIssues').checked = !!panelState.preset.failOnValidationIssues;\n";
-    out << "document.getElementById('failOnPreflightErrors').checked = !!panelState.preset.failOnPreflightErrors;\n";
-    out << "const alignMode = (panelState.preset.alignmentMode || 'center_page');\n";
-    out << "const alignInput = document.querySelector(`input[name=\\\"alignMode\\\"][value=\\\"${alignMode}\\\"]`);\n";
-    out << "if (alignInput) alignInput.checked = true;\n";
-    out << "showStep();\n";
-    out << "}\n";
-    out << "function exportState(){\n";
-    out << "const checkedAlign = document.querySelector('input[name=\\\"alignMode\\\"]:checked');\n";
-    out << "panelState.preset.alignmentMode = checkedAlign ? checkedAlign.value : 'center_page';\n";
-    out << "panelState.mode = document.getElementById('mode').value;\n";
-    out << "panelState.preset.columns = parseInt(document.getElementById('columns').value || '2', 10);\n";
-    out << "panelState.preset.rows = parseInt(document.getElementById('rows').value || '1', 10);\n";
-    out << "panelState.preset.fitToSlot = document.getElementById('fitToSlot').checked;\n";
-    out << "panelState.preset.autoRotateToFit = document.getElementById('autoRotateToFit').checked;\n";
-    out << "panelState.preset.reverseOrder = document.getElementById('reverseOrder').checked;\n";
-    out << "panelState.preset.filter = document.getElementById('filter').value;\n";
-    out << "panelState.preset.bookletCreepPerSheetPoints = parseFloat(document.getElementById('bookletCreepPerSheetPoints').value || '0');\n";
-    out << "panelState.sheet.widthPoints = parseFloat(document.getElementById('sheetWidth').value || '0');\n";
-    out << "panelState.sheet.heightPoints = parseFloat(document.getElementById('sheetHeight').value || '0');\n";
-    out << "panelState.preset.outputDirectory = document.getElementById('outputDirectory').value;\n";
-    out << "panelState.preset.outputStem = document.getElementById('outputStem').value;\n";
-    out << "panelState.preset.trimMarkLengthPoints = parseFloat(document.getElementById('trimMarkLengthPoints').value || '12');\n";
-    out << "panelState.preset.trimMarkOffsetPoints = parseFloat(document.getElementById('trimMarkOffsetPoints').value || '6');\n";
-    out << "panelState.preset.bleedPoints = parseFloat(document.getElementById('bleedPoints').value || '0');\n";
-    out << "panelState.preset.pdfxProfile = document.getElementById('pdfxProfile').value;\n";
-    out << "panelState.preset.drawTrimMarks = document.getElementById('drawTrimMarks').checked;\n";
-    out << "panelState.preset.drawBleedBox = document.getElementById('drawBleedBox').checked;\n";
-    out << "panelState.preset.failOnValidationIssues = document.getElementById('failOnValidationIssues').checked;\n";
-    out << "panelState.preset.failOnPreflightErrors = document.getElementById('failOnPreflightErrors').checked;\n";
-    out << "document.getElementById('output').textContent = JSON.stringify(panelState, null, 2);\n";
-    out << "}\n";
-    out << "setValues();\n";
-    out << "</script>\n";
-    out << "</body></html>";
-    return out.str();
-}
-
-ASInt32 NormalizeRotationDegrees(double rotationDegrees) {
-    if (!std::isfinite(rotationDegrees)) {
-        return 0;
-    }
-    double normalized = std::fmod(rotationDegrees, 360.0);
-    if (normalized < 0.0) {
-        normalized += 360.0;
-    }
-    const ASInt32 snapped = static_cast<ASInt32>(std::lround(normalized / 90.0)) * 90;
-    return (snapped == 360) ? 0 : snapped;
-}
-
-bool LoadSdkPlacementOps(const std::string& path,
-                         std::vector<aimp::AcrobatSdkPlacementOp>& outOps,
-                         std::string& errorMessage) {
-    outOps.clear();
-    std::ifstream in(path);
-    if (!in) {
-        errorMessage = "Could not open sdk-ops file";
-        return false;
-    }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    if (!aimp::ParseAcrobatSdkOpsJson(buffer.str(), outOps, errorMessage)) {
-        return false;
-    }
-    return true;
-}
-
-// Build a CropBox-aware PDF CTM for placing a Form XObject at targetRect.
-//
-// PDEFormCreate uses the Form BBox as the form's local coordinate system.
-// The CTM defines how form-local points map to output-page user space:
-//   x' = a*x + c*y + e
-//   y' = b*x + d*y + f
-//
-// For pages where CropBox.left != 0 or CropBox.bottom != 0, a naive CTM
-// derived from targetRect alone misplaces the content.  This function
-// computes the correct CTM from the actual CropBox origin and dimensions.
-static ASFixedMatrix BuildCropBoxCorrectCtm(const aimp::AcrobatSdkPlacementOp& op,
-                                            const ASFixedRect& srcBBox) {
-    const double cropX1 = ASFixedToFloat(srcBBox.left);
-    const double cropY1 = ASFixedToFloat(srcBBox.bottom);
-    const double cropX2 = ASFixedToFloat(srcBBox.right);
-    const double cropY2 = ASFixedToFloat(srcBBox.top);
-    const double cropW  = cropX2 - cropX1;
-    const double cropH  = cropY2 - cropY1;
-    const double tx = op.targetRect.x;
-    const double ty = op.targetRect.y;
-    const double tw = op.targetRect.width;
-    const double th = op.targetRect.height;
-
-    ASFixedMatrix ctm {};
-    if (cropW <= 0.0 || cropH <= 0.0) {
-        // Degenerate BBox — fall back to plan CTM verbatim.
-        ctm.a = ASFloatToFixed(static_cast<ASReal>(op.ctmA));
-        ctm.b = ASFloatToFixed(static_cast<ASReal>(op.ctmB));
-        ctm.c = ASFloatToFixed(static_cast<ASReal>(op.ctmC));
-        ctm.d = ASFloatToFixed(static_cast<ASReal>(op.ctmD));
-        ctm.h = ASFloatToFixed(static_cast<ASReal>(op.ctmE));
-        ctm.v = ASFloatToFixed(static_cast<ASReal>(op.ctmF));
-        return ctm;
-    }
-
-    const int rot = NormalizeRotationDegrees(op.rotationDegrees);
-
-    if (rot == 0) {
-        // Scale from CropBox to targetRect, account for CropBox origin.
-        const double sx = tw / cropW;
-        const double sy = th / cropH;
-        ctm.a = ASFloatToFixed(static_cast<ASReal>(sx));
-        ctm.b = fixedZero;
-        ctm.c = fixedZero;
-        ctm.d = ASFloatToFixed(static_cast<ASReal>(sy));
-        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx - sx * cropX1));
-        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty - sy * cropY1));
-    } else if (rot == 90) {
-        // 90° CW: source bottom-left → output bottom-right.
-        // b = th/cropW,  c = -tw/cropH
-        const double bv = th / cropW;
-        const double cv = -tw / cropH;
-        ctm.a = fixedZero;
-        ctm.b = ASFloatToFixed(static_cast<ASReal>(bv));
-        ctm.c = ASFloatToFixed(static_cast<ASReal>(cv));
-        ctm.d = fixedZero;
-        // e = tx + tw + c * cropY1 = tx + tw - (tw/cropH)*cropY1
-        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx + tw + cv * cropY1));
-        // f = ty - b * cropX1
-        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty - bv * cropX1));
-    } else if (rot == 180) {
-        // 180°: source bottom-left → output top-right.
-        const double sx = tw / cropW;
-        const double sy = th / cropH;
-        ctm.a = ASFloatToFixed(static_cast<ASReal>(-sx));
-        ctm.b = fixedZero;
-        ctm.c = fixedZero;
-        ctm.d = ASFloatToFixed(static_cast<ASReal>(-sy));
-        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx + tw + sx * cropX1));
-        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty + th + sy * cropY1));
-    } else if (rot == 270) {
-        // 270° CW (= 90° CCW): source bottom-left → output top-left.
-        // b = -th/cropW,  c = tw/cropH
-        const double bv = -th / cropW;
-        const double cv =  tw / cropH;
-        ctm.a = fixedZero;
-        ctm.b = ASFloatToFixed(static_cast<ASReal>(bv));
-        ctm.c = ASFloatToFixed(static_cast<ASReal>(cv));
-        ctm.d = fixedZero;
-        ctm.h = ASFloatToFixed(static_cast<ASReal>(tx - cv * cropY1));
-        ctm.v = ASFloatToFixed(static_cast<ASReal>(ty + th - bv * cropX1));
-    } else {
-        // Unsupported arbitrary rotation — fall back to plan CTM.
-        ctm.a = ASFloatToFixed(static_cast<ASReal>(op.ctmA));
-        ctm.b = ASFloatToFixed(static_cast<ASReal>(op.ctmB));
-        ctm.c = ASFloatToFixed(static_cast<ASReal>(op.ctmC));
-        ctm.d = ASFloatToFixed(static_cast<ASReal>(op.ctmD));
-        ctm.h = ASFloatToFixed(static_cast<ASReal>(op.ctmE));
-        ctm.v = ASFloatToFixed(static_cast<ASReal>(op.ctmF));
-    }
-    return ctm;
-}
-
-bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
-                                   const aimp::ImpositionPlan& plan,
-                                   const std::string& sdkOpsPath,
-                                   const std::string& outputPdfPath,
-                                   std::string& errorMessage) {
-    std::vector<aimp::AcrobatSdkPlacementOp> ops;
-    if (!LoadSdkPlacementOps(sdkOpsPath, ops, errorMessage)) {
-        return false;
-    }
-    const auto opIssues = aimp::ValidateAcrobatSdkOps(plan, ops);
-    if (!opIssues.empty()) {
-        errorMessage = "sdk-ops validation failed before native compose.";
-        return false;
-    }
-    std::vector<std::vector<aimp::AcrobatSdkPlacementOp>> sheetBuckets;
-    if (!aimp::BuildSheetComposeBuckets(plan, ops, sheetBuckets, errorMessage)) {
-        return false;
-    }
-
-    // Native N-up imposition via PDEContent/PDEForm XObject placement.
-    // One output page is created per sheet; each source page occupies a slot
-    // placed as a Form XObject with a CropBox-corrected CTM.
-    PDDoc outDoc = PDDocCreate();
-    if (outDoc == nullptr) {
-        errorMessage = "PDDocCreate failed";
-        return false;
-    }
-
-    const double sheetW = plan.outputSheet.widthPoints;
-    const double sheetH = plan.outputSheet.heightPoints;
-
-    for (std::size_t sheetIdx = 0; sheetIdx < sheetBuckets.size(); ++sheetIdx) {
-        const auto& sheetOps = sheetBuckets[sheetIdx];
-
-        // ── Create one blank output page per sheet ────────────────────────────
-        ASFixedRect sheetMediaBox {};
-        sheetMediaBox.left   = fixedZero;
-        sheetMediaBox.bottom = fixedZero;
-        sheetMediaBox.right  = ASFloatToFixed(static_cast<ASReal>(sheetW));
-        sheetMediaBox.top    = ASFloatToFixed(static_cast<ASReal>(sheetH));
-
-        const ASInt32 insertAfterPage = PDDocGetNumPages(outDoc) - 1;
-        PDPage outPage = PDDocCreatePage(outDoc, insertAfterPage, sheetMediaBox);
-        if (outPage == nullptr) {
-            errorMessage = "PDDocCreatePage failed for sheet " + std::to_string(sheetIdx);
-            PDDocClose(outDoc);
-            return false;
-        }
-
-        // Acquire the output page PDEContent so we can add Form XObjects.
-        PDEContent outContent = PDPageAcquirePDEContent(outPage, 0);
-        if (outContent == nullptr) {
-            PDPageRelease(outPage);
-            PDDocClose(outDoc);
-            errorMessage = "PDPageAcquirePDEContent failed for sheet " + std::to_string(sheetIdx);
-            return false;
-        }
-
-        bool sheetOk = true;
-        for (const auto& op : sheetOps) {
-            if (op.isBlank) continue;
-
-            // ── Acquire source page ───────────────────────────────────────────
-            PDPage srcPage = PDDocAcquirePage(sourceDoc,
-                                              static_cast<ASInt32>(op.sourcePageIndex));
-            if (srcPage == nullptr) {
-                errorMessage = "PDDocAcquirePage failed for source page "
-                               + std::to_string(op.sourcePageIndex);
-                sheetOk = false;
-                break;
-            }
-
-            // ── Create Form XObject from source page content ──────────────────
-            // Acquire source content, convert to a Form XObject CosStream via
-            // PDEContentToCosObj(kPDEContentToForm), then wrap with PDEFormCreateFromCosObj.
-            ASFixedRect srcBBox {};
-            PDPageGetCropBox(srcPage, &srcBBox);
-
-            PDEContent srcContent = PDPageAcquirePDEContent(srcPage, 0);
-            if (srcContent != nullptr) {
-                // PDEContentAttrs carries the BBox for the Form XObject.
-                PDEContentAttrs formAttrs {};
-                formAttrs.flags   = 0;
-                formAttrs.formType = 1;
-                formAttrs.bbox    = srcBBox;
-                // Identity matrix — placement is handled by the PDEForm CTM below.
-                formAttrs.matrix.a = fixedOne;
-                formAttrs.matrix.b = fixedZero;
-                formAttrs.matrix.c = fixedZero;
-                formAttrs.matrix.d = fixedOne;
-                formAttrs.matrix.h = fixedZero;
-                formAttrs.matrix.v = fixedZero;
-
-                CosObj formCosObj {};
-                CosObj resCosObj {};
-                PDEContentToCosObj(srcContent,
-                                   kPDEContentToForm,
-                                   &formAttrs,
-                                   static_cast<ASUns32>(sizeof(formAttrs)),
-                                   PDDocGetCosDoc(outDoc),
-                                   nullptr,
-                                   &formCosObj,
-                                   &resCosObj);
-
-                if (CosObjGetType(formCosObj) != CosNull) {
-                    // Build the placement CTM with CropBox-origin correction.
-                    ASFixedMatrix ctm = BuildCropBoxCorrectCtm(op, srcBBox);
-
-                    PDEForm srcForm = PDEFormCreateFromCosObj(&formCosObj, nullptr, &ctm);
-                    if (srcForm != nullptr) {
-                        PDEContentAddElem(outContent, kPDEAfterLast,
-                                          reinterpret_cast<PDEElement>(srcForm));
-                        PDERelease(reinterpret_cast<PDEObject>(srcForm));
-                    }
-                }
-
-                PDPageReleasePDEContent(srcPage, 0);
-            }
-            PDPageRelease(srcPage);
-        }
-
-        // ── Commit modified content back to the output page ───────────────────
-        PDPageSetPDEContent(outPage, 0);
-        PDPageReleasePDEContent(outPage, 0);
-        PDPageRelease(outPage);
-
-        if (!sheetOk) {
-            PDDocClose(outDoc);
-            return false;
-        }
-    }
-
-    // ── Discard top-level annotations on every output page ───────────────────
-    // Source page annotations are captured inside Form XObjects as static content.
-    // Interactive annotations (widgets) on the output pages are removed so the
-    // imposed sheet is non-interactive.
-    {
-        const ASInt32 outPageCount = PDDocGetNumPages(outDoc);
-        for (ASInt32 pi = 0; pi < outPageCount; ++pi) {
-            PDPage pg = PDDocAcquirePage(outDoc, pi);
-            if (pg == nullptr) continue;
-            // Iterate backwards so removal doesn't shift indices.
-            // PDPageRemoveAnnot takes an index, not a PDAnnot handle.
-            ASInt32 annotCount = PDPageGetNumAnnots(pg);
-            for (ASInt32 ai = annotCount - 1; ai >= 0; --ai) {
-                PDPageRemoveAnnot(pg, ai);
-            }
-            PDPageRelease(pg);
-        }
-    }
-
-    // ── Inject OutputIntent for PDF/X compliance ──────────────────────────────
-    // When the source document carries an OutputIntent, copy it to the output.
-    {
-        CosDoc srcCosDoc  = PDDocGetCosDoc(sourceDoc);
-        CosObj srcCatalog = CosDocGetRoot(srcCosDoc);
-        CosObj srcOIArr   = CosDictGet(srcCatalog, ASAtomFromString("OutputIntents"));
-        if (CosObjGetType(srcOIArr) == CosArray && CosArrayLength(srcOIArr) > 0) {
-            CosDoc outCosDoc  = PDDocGetCosDoc(outDoc);
-            CosObj outCatalog = CosDocGetRoot(outCosDoc);
-            // Copy first OutputIntent entry into output catalog.
-            CosObj srcOI = CosArrayGet(srcOIArr, 0);
-            CosObj outOI = CosObjCopy(srcOI, outCosDoc, false);
-            CosObj outOIArr = CosNewArray(outCosDoc, false, 1);
-            CosArrayPut(outOIArr, 0, outOI);
-            CosDictPut(outCatalog, ASAtomFromString("OutputIntents"), outOIArr);
-        }
-    }
-
-    // ── Save output document ──────────────────────────────────────────────────
-    const ASFileSys fileSys = ASGetDefaultFileSys();
-    ASPathName outPath = ASFileSysCreatePathName(fileSys, ASAtomFromString("Cstring"),
-                                                  outputPdfPath.c_str(), nullptr);
-    if (outPath == nullptr) {
-        errorMessage = "Could not create output path";
-        PDDocClose(outDoc);
-        return false;
-    }
-    // PDDocSave returns void in this SDK; exceptions surface via Acrobat's DURING/HANDLER.
-    PDDocSave(outDoc, PDSaveFull | PDSaveCollectGarbage, outPath, nullptr, nullptr, nullptr);
-    ASFileSysReleasePath(fileSys, outPath);
-    PDDocClose(outDoc);
-    return true;
-}
-
-// Compose an ImpositionPlan directly from a PDDoc — no sdk-ops temp file needed.
-// Builds the sdk-ops JSON in memory, then runs the native SDK composer.
-static bool NativeComposePlan(PDDoc sourceDoc,
-                               const aimp::ImpositionPlan& plan,
-                               const std::string& outputPdfPath,
-                               std::string& errorMessage) {
-    std::error_code fsError;
-    const auto tempDir = std::filesystem::temp_directory_path(fsError);
-    if (fsError) {
-        errorMessage = "Cannot determine temp directory";
-        return false;
-    }
-    const auto sdkOpsPath = (tempDir / "imposr-sdk-ops-tmp.json").string();
-    {
-        std::ofstream out(sdkOpsPath);
-        if (!out) {
-            errorMessage = "Cannot write sdk-ops temp file";
-            return false;
-        }
-        out << aimp::ToAcrobatSdkOpsJson(plan);
-    }
-    return TryRunExperimentalSdkComposer(sourceDoc, plan, sdkOpsPath, outputPdfPath, errorMessage);
-}
-
-// Open a PDF in Acrobat and return the AVDoc, or nullptr on failure.
-static AVDoc OpenPdfInAcrobat(const std::string& pdfPath) {
-    const ASFileSys fileSys = ASGetDefaultFileSys();
-    ASPathName asPath = ASFileSysCreatePathName(fileSys, ASAtomFromString("Cstring"),
-                                                pdfPath.c_str(), nullptr);
-    if (asPath == nullptr) return nullptr;
-    AVDoc doc = AVDocOpenFromFile(asPath, fileSys, nullptr);
-    ASFileSysReleasePath(fileSys, asPath);
-    return doc;
-}
-
-// Read the CropBox dimensions of the first page.
 static bool GetFirstPageDimensions(PDDoc pdDoc, double& outW, double& outH) {
     if (PDDocGetNumPages(pdDoc) <= 0) return false;
     PDPage pg = PDDocAcquirePage(pdDoc, 0);
-    if (pg == nullptr) return false;
+    if (!pg) return false;
     ASFixedRect cb {};
     PDPageGetCropBox(pg, &cb);
     PDPageRelease(pg);
@@ -847,531 +435,854 @@ static bool GetFirstPageDimensions(PDDoc pdDoc, double& outW, double& outH) {
     return outW > 0.0 && outH > 0.0;
 }
 
-bool RegisterMenus() {
-    AVMenubar menubar = AVAppGetMenubar();
-    if (menubar == nullptr) {
-        return false;
+static AVDoc OpenPdfInAcrobat(const std::string& path) {
+    const ASFileSys fs = ASGetDefaultFileSys();
+    ASPathName ap = ASFileSysCreatePathName(fs, ASAtomFromString("Cstring"),
+                                             path.c_str(), nullptr);
+    if (!ap) return nullptr;
+    AVDoc doc = AVDocOpenFromFile(ap, fs, nullptr);
+    ASFileSysReleasePath(fs, ap);
+    return doc;
+}
+
+// ── PDF composition engine ────────────────────────────────────────────────────
+
+static ASInt32 NormalizeRotation(double deg) {
+    if (!std::isfinite(deg)) return 0;
+    double n = std::fmod(deg, 360.0);
+    if (n < 0.0) n += 360.0;
+    const ASInt32 s = static_cast<ASInt32>(std::lround(n / 90.0)) * 90;
+    return (s == 360) ? 0 : s;
+}
+
+static ASFixedMatrix BuildCropBoxCorrectCtm(const aimp::AcrobatSdkPlacementOp& op,
+                                             const ASFixedRect& srcBBox) {
+    const double cx1 = ASFixedToFloat(srcBBox.left);
+    const double cy1 = ASFixedToFloat(srcBBox.bottom);
+    const double cx2 = ASFixedToFloat(srcBBox.right);
+    const double cy2 = ASFixedToFloat(srcBBox.top);
+    const double cw  = cx2 - cx1;
+    const double ch  = cy2 - cy1;
+    const double tx  = op.targetRect.x;
+    const double ty  = op.targetRect.y;
+    const double tw  = op.targetRect.width;
+    const double th  = op.targetRect.height;
+
+    ASFixedMatrix ctm {};
+    if (cw <= 0.0 || ch <= 0.0) {
+        ctm.a = ASFloatToFixed((ASReal)op.ctmA);
+        ctm.b = ASFloatToFixed((ASReal)op.ctmB);
+        ctm.c = ASFloatToFixed((ASReal)op.ctmC);
+        ctm.d = ASFloatToFixed((ASReal)op.ctmD);
+        ctm.h = ASFloatToFixed((ASReal)op.ctmE);
+        ctm.v = ASFloatToFixed((ASReal)op.ctmF);
+        return ctm;
     }
 
-    // AVMenuNew(title, name, owner) — 3 args in this SDK version.
-    gPluginSubMenu = AVMenuNew(kPluginMenuTitle, kExtensionName, nullptr);
-    if (gPluginSubMenu == nullptr) {
-        return false;
+    const int rot = NormalizeRotation(op.rotationDegrees);
+
+    if (rot == 0) {
+        const double sx = tw / cw, sy = th / ch;
+        ctm.a = ASFloatToFixed((ASReal)sx);
+        ctm.b = fixedZero; ctm.c = fixedZero;
+        ctm.d = ASFloatToFixed((ASReal)sy);
+        ctm.h = ASFloatToFixed((ASReal)(tx - sx * cx1));
+        ctm.v = ASFloatToFixed((ASReal)(ty - sy * cy1));
+    } else if (rot == 90) {
+        const double bv =  th / cw, cv = -tw / ch;
+        ctm.a = fixedZero;
+        ctm.b = ASFloatToFixed((ASReal)bv);
+        ctm.c = ASFloatToFixed((ASReal)cv);
+        ctm.d = fixedZero;
+        ctm.h = ASFloatToFixed((ASReal)(tx + tw + cv * cy1));
+        ctm.v = ASFloatToFixed((ASReal)(ty - bv * cx1));
+    } else if (rot == 180) {
+        const double sx = tw / cw, sy = th / ch;
+        ctm.a = ASFloatToFixed((ASReal)(-sx));
+        ctm.b = fixedZero; ctm.c = fixedZero;
+        ctm.d = ASFloatToFixed((ASReal)(-sy));
+        ctm.h = ASFloatToFixed((ASReal)(tx + tw + sx * cx1));
+        ctm.v = ASFloatToFixed((ASReal)(ty + th + sy * cy1));
+    } else if (rot == 270) {
+        const double bv = -th / cw, cv = tw / ch;
+        ctm.a = fixedZero;
+        ctm.b = ASFloatToFixed((ASReal)bv);
+        ctm.c = ASFloatToFixed((ASReal)cv);
+        ctm.d = fixedZero;
+        ctm.h = ASFloatToFixed((ASReal)(tx - cv * cy1));
+        ctm.v = ASFloatToFixed((ASReal)(ty + th - bv * cx1));
+    } else {
+        ctm.a = ASFloatToFixed((ASReal)op.ctmA);
+        ctm.b = ASFloatToFixed((ASReal)op.ctmB);
+        ctm.c = ASFloatToFixed((ASReal)op.ctmC);
+        ctm.d = ASFloatToFixed((ASReal)op.ctmD);
+        ctm.h = ASFloatToFixed((ASReal)op.ctmE);
+        ctm.v = ASFloatToFixed((ASReal)op.ctmF);
+    }
+    return ctm;
+}
+
+static bool TryRunExperimentalSdkComposer(PDDoc sourceDoc,
+                                          const aimp::ImpositionPlan& plan,
+                                          const std::string& sdkOpsPath,
+                                          const std::string& outputPdfPath,
+                                          std::string& err) {
+    std::vector<aimp::AcrobatSdkPlacementOp> ops;
+    {
+        std::ifstream in(sdkOpsPath);
+        if (!in) { err = "Cannot open sdk-ops file"; return false; }
+        std::ostringstream buf; buf << in.rdbuf();
+        if (!aimp::ParseAcrobatSdkOpsJson(buf.str(), ops, err)) return false;
+    }
+    const auto opIssues = aimp::ValidateAcrobatSdkOps(plan, ops);
+    if (!opIssues.empty()) { err = "sdk-ops validation failed"; return false; }
+
+    std::vector<std::vector<aimp::AcrobatSdkPlacementOp>> buckets;
+    if (!aimp::BuildSheetComposeBuckets(plan, ops, buckets, err)) return false;
+
+    PDDoc outDoc = PDDocCreate();
+    if (!outDoc) { err = "PDDocCreate failed"; return false; }
+
+    const double shW = plan.outputSheet.widthPoints;
+    const double shH = plan.outputSheet.heightPoints;
+
+    for (std::size_t si = 0; si < buckets.size(); ++si) {
+        ASFixedRect mb {};
+        mb.left   = fixedZero;
+        mb.bottom = fixedZero;
+        mb.right  = ASFloatToFixed((ASReal)shW);
+        mb.top    = ASFloatToFixed((ASReal)shH);
+
+        const ASInt32 ins = PDDocGetNumPages(outDoc) - 1;
+        PDPage outPg = PDDocCreatePage(outDoc, ins, mb);
+        if (!outPg) {
+            err = "PDDocCreatePage failed for sheet " + std::to_string(si);
+            PDDocClose(outDoc); return false;
+        }
+        PDEContent outContent = PDPageAcquirePDEContent(outPg, 0);
+        if (!outContent) {
+            PDPageRelease(outPg); PDDocClose(outDoc);
+            err = "PDPageAcquirePDEContent failed"; return false;
+        }
+
+        bool ok = true;
+        for (const auto& op : buckets[si]) {
+            if (op.isBlank) continue;
+            PDPage srcPage = PDDocAcquirePage(sourceDoc, (ASInt32)op.sourcePageIndex);
+            if (!srcPage) {
+                err = "PDDocAcquirePage failed for page " + std::to_string(op.sourcePageIndex);
+                ok = false; break;
+            }
+            ASFixedRect srcBBox {};
+            PDPageGetCropBox(srcPage, &srcBBox);
+            PDEContent srcContent = PDPageAcquirePDEContent(srcPage, 0);
+            if (srcContent) {
+                PDEContentAttrs fa {};
+                fa.flags     = 0;
+                fa.formType  = 1;
+                fa.bbox      = srcBBox;
+                fa.matrix.a  = fixedOne;  fa.matrix.b = fixedZero;
+                fa.matrix.c  = fixedZero; fa.matrix.d = fixedOne;
+                fa.matrix.h  = fixedZero; fa.matrix.v = fixedZero;
+                CosObj formObj {}, resObj {};
+                PDEContentToCosObj(srcContent, kPDEContentToForm, &fa,
+                                   (ASUns32)sizeof(fa), PDDocGetCosDoc(outDoc),
+                                   nullptr, &formObj, &resObj);
+                if (CosObjGetType(formObj) != CosNull) {
+                    ASFixedMatrix ctm = BuildCropBoxCorrectCtm(op, srcBBox);
+                    PDEForm frm = PDEFormCreateFromCosObj(&formObj, nullptr, &ctm);
+                    if (frm) {
+                        PDEContentAddElem(outContent, kPDEAfterLast, (PDEElement)frm);
+                        PDERelease((PDEObject)frm);
+                    }
+                }
+                PDPageReleasePDEContent(srcPage, 0);
+            }
+            PDPageRelease(srcPage);
+        }
+
+        PDPageSetPDEContent(outPg, 0);
+        PDPageReleasePDEContent(outPg, 0);
+        PDPageRelease(outPg);
+        if (!ok) { PDDocClose(outDoc); return false; }
     }
 
-    // Add the submenu directly to the menubar (not via a menu item).
-    AVMenubarAddMenu(menubar, gPluginSubMenu, APPEND_MENU);
-
-    // ── Core imposition actions ───────────────────────────────────────────────
-    gCreateBookletProc = ASCallbackCreateProto(AVExecuteProc, ExecuteCreateBooklet);
-    gCreateBookletMenuItem = AVMenuItemNew(
-        kMenuItemCreateBookletTitle,
-        "AIMP:CreateBooklet",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    AVMenuItemSetExecuteProc(gCreateBookletMenuItem, gCreateBookletProc, nullptr);
-    if (gCreateBookletMenuItem == nullptr) { return false; }
-    AVMenuAddMenuItem(gPluginSubMenu, gCreateBookletMenuItem, APPEND_MENUITEM);
-
-    gNUpPagesProc = ASCallbackCreateProto(AVExecuteProc, ExecuteNUpPages);
-    gNUpPagesMenuItem = AVMenuItemNew(
-        kMenuItemNUpPagesTitle,
-        "AIMP:NUpPages",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    AVMenuItemSetExecuteProc(gNUpPagesMenuItem, gNUpPagesProc, nullptr);
-    if (gNUpPagesMenuItem == nullptr) { return false; }
-    AVMenuAddMenuItem(gPluginSubMenu, gNUpPagesMenuItem, APPEND_MENUITEM);
-
-    gStepAndRepeatProc = ASCallbackCreateProto(AVExecuteProc, ExecuteStepAndRepeat);
-    gStepAndRepeatMenuItem = AVMenuItemNew(
-        kMenuItemStepAndRepeatTitle,
-        "AIMP:StepAndRepeat",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    AVMenuItemSetExecuteProc(gStepAndRepeatMenuItem, gStepAndRepeatProc, nullptr);
-    if (gStepAndRepeatMenuItem == nullptr) { return false; }
-    AVMenuAddMenuItem(gPluginSubMenu, gStepAndRepeatMenuItem, APPEND_MENUITEM);
-
-    // ── Legacy / advanced items ───────────────────────────────────────────────
-    // AVMenuItemNew does NOT take an execute proc — use AVMenuItemSetExecuteProc.
-    gMenuExecuteProc = ASCallbackCreateProto(AVExecuteProc, ExecuteTwoUpDemo);
-    gPluginMenuItem = AVMenuItemNew(
-        kMenuItemTitle,
-        "AIMP:TwoUpDemo",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    AVMenuItemSetExecuteProc(gPluginMenuItem, gMenuExecuteProc, nullptr);
-
-    if (gPluginMenuItem == nullptr) {
-        return false;
+    // Remove interactive annotations from output pages
+    const ASInt32 opCount = PDDocGetNumPages(outDoc);
+    for (ASInt32 pi = 0; pi < opCount; ++pi) {
+        PDPage pg = PDDocAcquirePage(outDoc, pi);
+        if (!pg) continue;
+        for (ASInt32 ai = PDPageGetNumAnnots(pg) - 1; ai >= 0; --ai)
+            PDPageRemoveAnnot(pg, ai);
+        PDPageRelease(pg);
     }
 
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginMenuItem, APPEND_MENUITEM);
-
-    gReportExecuteProc = ASCallbackCreateProto(AVExecuteProc, ExecuteTwoUpReportExport);
-    gPluginReportMenuItem = AVMenuItemNew(
-        kMenuItemReportTitle,
-        "AIMP:TwoUpReportPdf",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginReportMenuItem == nullptr) {
-        return false;
+    // Copy OutputIntent from source
+    {
+        CosDoc srcCD  = PDDocGetCosDoc(sourceDoc);
+        CosObj srcCat = CosDocGetRoot(srcCD);
+        CosObj srcOIA = CosDictGet(srcCat, ASAtomFromString("OutputIntents"));
+        if (CosObjGetType(srcOIA) == CosArray && CosArrayLength(srcOIA) > 0) {
+            CosDoc outCD  = PDDocGetCosDoc(outDoc);
+            CosObj outCat = CosDocGetRoot(outCD);
+            CosObj outOI  = CosObjCopy(CosArrayGet(srcOIA, 0), outCD, false);
+            CosObj outArr = CosNewArray(outCD, false, 1);
+            CosArrayPut(outArr, 0, outOI);
+            CosDictPut(outCat, ASAtomFromString("OutputIntents"), outArr);
+        }
     }
-    AVMenuItemSetExecuteProc(gPluginReportMenuItem, gReportExecuteProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginReportMenuItem, APPEND_MENUITEM);
 
-    gPresetSaveProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetSave);
-    gPluginPresetSaveMenuItem = AVMenuItemNew(
-        kMenuItemPresetSaveTitle,
-        "AIMP:PresetSave",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPresetSaveMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPresetSaveMenuItem, gPresetSaveProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetSaveMenuItem, APPEND_MENUITEM);
-
-    gPresetPreviewProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetPreview);
-    gPluginPresetPreviewMenuItem = AVMenuItemNew(
-        kMenuItemPresetPreviewTitle,
-        "AIMP:PresetPreview",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPresetPreviewMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPresetPreviewMenuItem, gPresetPreviewProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetPreviewMenuItem, APPEND_MENUITEM);
-
-    gPresetRunProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetRunBundle);
-    gPluginPresetRunMenuItem = AVMenuItemNew(
-        kMenuItemPresetRunTitle,
-        "AIMP:PresetRunBundle",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPresetRunMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPresetRunMenuItem, gPresetRunProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetRunMenuItem, APPEND_MENUITEM);
-
-    gPresetValidateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetValidate);
-    gPluginPresetValidateMenuItem = AVMenuItemNew(
-        kMenuItemPresetValidateTitle,
-        "AIMP:PresetValidate",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPresetValidateMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPresetValidateMenuItem, gPresetValidateProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetValidateMenuItem, APPEND_MENUITEM);
-
-    gPresetQuickConfigProc = ASCallbackCreateProto(AVExecuteProc, ExecutePresetQuickConfigure);
-    gPluginPresetQuickConfigMenuItem = AVMenuItemNew(
-        kMenuItemPresetQuickConfigTitle,
-        "AIMP:PresetQuickConfigure",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPresetQuickConfigMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPresetQuickConfigMenuItem, gPresetQuickConfigProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPresetQuickConfigMenuItem, APPEND_MENUITEM);
-
-    gPanelCycleLayoutProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelCycleLayout);
-    gPluginPanelCycleLayoutMenuItem = AVMenuItemNew(
-        kMenuItemPanelCycleLayoutTitle,
-        "AIMP:PanelCycleLayout",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelCycleLayoutMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelCycleLayoutMenuItem, gPanelCycleLayoutProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelCycleLayoutMenuItem, APPEND_MENUITEM);
-
-    gPanelTogglePrepressProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelTogglePrepress);
-    gPluginPanelTogglePrepressMenuItem = AVMenuItemNew(
-        kMenuItemPanelTogglePrepressTitle,
-        "AIMP:PanelTogglePrepress",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelTogglePrepressMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelTogglePrepressMenuItem, gPanelTogglePrepressProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelTogglePrepressMenuItem, APPEND_MENUITEM);
-
-    gPanelSetOutputTempProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelSetOutputTemp);
-    gPluginPanelSetOutputTempMenuItem = AVMenuItemNew(
-        kMenuItemPanelSetOutputTempTitle,
-        "AIMP:PanelSetOutputTemp",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelSetOutputTempMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelSetOutputTempMenuItem, gPanelSetOutputTempProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelSetOutputTempMenuItem, APPEND_MENUITEM);
-
-    gPanelShowStateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelShowState);
-    gPluginPanelShowStateMenuItem = AVMenuItemNew(
-        kMenuItemPanelShowStateTitle,
-        "AIMP:PanelShowState",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelShowStateMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelShowStateMenuItem, gPanelShowStateProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelShowStateMenuItem, APPEND_MENUITEM);
-
-    gPanelApplyStateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelApplyState);
-    gPluginPanelApplyStateMenuItem = AVMenuItemNew(
-        kMenuItemPanelApplyStateTitle,
-        "AIMP:PanelApplyState",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelApplyStateMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelApplyStateMenuItem, gPanelApplyStateProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelApplyStateMenuItem, APPEND_MENUITEM);
-
-    gPanelToggleQualityGateProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelToggleQualityGate);
-    gPluginPanelToggleQualityGateMenuItem = AVMenuItemNew(
-        kMenuItemPanelToggleQualityGateTitle,
-        "AIMP:PanelToggleQualityGate",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelToggleQualityGateMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelToggleQualityGateMenuItem, gPanelToggleQualityGateProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelToggleQualityGateMenuItem, APPEND_MENUITEM);
-
-    gPanelSheetA4Proc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelSheetA4);
-    gPluginPanelSheetA4MenuItem = AVMenuItemNew(
-        kMenuItemPanelSheetA4Title,
-        "AIMP:PanelSheetA4",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelSheetA4MenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelSheetA4MenuItem, gPanelSheetA4Proc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelSheetA4MenuItem, APPEND_MENUITEM);
-
-    gPanelSheetA3Proc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelSheetA3);
-    gPluginPanelSheetA3MenuItem = AVMenuItemNew(
-        kMenuItemPanelSheetA3Title,
-        "AIMP:PanelSheetA3",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelSheetA3MenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelSheetA3MenuItem, gPanelSheetA3Proc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelSheetA3MenuItem, APPEND_MENUITEM);
-
-    gPanelExportDialogPackageProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelExportDialogPackage);
-    gPluginPanelExportDialogPackageMenuItem = AVMenuItemNew(
-        kMenuItemPanelExportDialogPackageTitle,
-        "AIMP:PanelExportDialogPackage",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelExportDialogPackageMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelExportDialogPackageMenuItem, gPanelExportDialogPackageProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelExportDialogPackageMenuItem, APPEND_MENUITEM);
-
-    gPanelOpenUnifiedDialogProc = ASCallbackCreateProto(AVExecuteProc, ExecutePanelOpenUnifiedDialog);
-    gPluginPanelOpenUnifiedDialogMenuItem = AVMenuItemNew(
-        kMenuItemPanelOpenUnifiedDialogTitle,
-        "AIMP:PanelOpenUnifiedDialog",
-        nullptr,
-        true,
-        NO_SHORTCUT,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (gPluginPanelOpenUnifiedDialogMenuItem == nullptr) {
-        return false;
-    }
-    AVMenuItemSetExecuteProc(gPluginPanelOpenUnifiedDialogMenuItem, gPanelOpenUnifiedDialogProc, nullptr);
-    AVMenuAddMenuItem(gPluginSubMenu, gPluginPanelOpenUnifiedDialogMenuItem, APPEND_MENUITEM);
-
+    const ASFileSys fs = ASGetDefaultFileSys();
+    ASPathName outAP = ASFileSysCreatePathName(fs, ASAtomFromString("Cstring"),
+                                               outputPdfPath.c_str(), nullptr);
+    if (!outAP) { err = "Cannot create output path"; PDDocClose(outDoc); return false; }
+    PDDocSave(outDoc, PDSaveFull | PDSaveCollectGarbage, outAP, nullptr, nullptr, nullptr);
+    ASFileSysReleasePath(fs, outAP);
+    PDDocClose(outDoc);
     return true;
 }
 
-// ── Create Booklet ─────────────────────────────────────────────────────────
-// Saddle-stitch booklet: two source pages per sheet, sheet width = 2 × page width.
-// Pads to next multiple of 4 automatically.
-ACCB1 void ACCB2 ExecuteCreateBooklet(void* clientData) {
+static bool NativeComposePlan(PDDoc sourceDoc,
+                               const aimp::ImpositionPlan& plan,
+                               const std::string& outputPath,
+                               std::string& err) {
+    std::error_code fse;
+    const auto tmp = std::filesystem::temp_directory_path(fse);
+    if (fse) { err = "Cannot determine temp dir"; return false; }
+    const auto opsPath = (tmp / "imposr-sdk-ops-tmp.json").string();
+    {
+        std::ofstream out(opsPath);
+        if (!out) { err = "Cannot write sdk-ops"; return false; }
+        out << aimp::ToAcrobatSdkOpsJson(plan);
+    }
+    return TryRunExperimentalSdkComposer(sourceDoc, plan, opsPath, outputPath, err);
+}
+
+// Build a reorder plan manually (used by Shuffle Pages, Reverse Pages, etc.)
+static aimp::ImpositionPlan BuildReorderPlan(const std::string& docId,
+                                              const std::vector<std::uint32_t>& pageOrder,
+                                              double pageW, double pageH) {
+    aimp::ImpositionPlan plan;
+    plan.mode = aimp::LayoutMode::Manual;
+    plan.outputSheet = {pageW, pageH};
+    plan.sourcePageCount = (std::uint32_t)pageOrder.size();
+    plan.paddedPageCount = plan.sourcePageCount;
+
+    for (std::uint32_t i = 0; i < (std::uint32_t)pageOrder.size(); ++i) {
+        aimp::SlotPlacement p;
+        p.sheetIndex = i;
+        p.slotIndex  = 0;
+        p.sourcePage.sourceDocumentId = docId;
+        p.sourcePage.pageIndex        = pageOrder[i];
+        p.targetRect = {0.0, 0.0, pageW, pageH};
+        p.rotationDegrees = 0.0;
+        p.scale = 1.0;
+        plan.placements.push_back(p);
+    }
+    return plan;
+}
+
+// ── Dialog parameter structs ──────────────────────────────────────────────────
+
+struct BookletParams {
+    bool     cancelled       = true;
+    double   sheetWidth      = 0;
+    double   sheetHeight     = 0;
+    bool     bindingLeft     = true;
+    std::uint32_t sigSize    = 0;   // 0 = all
+    double   creepPerSheet   = 0;
+    bool     autoPad         = true;
+};
+
+struct NUpParams {
+    bool     cancelled   = true;
+    std::uint32_t cols   = 2;
+    std::uint32_t rows   = 2;
+    double   sheetWidth  = 0;
+    double   sheetHeight = 0;
+    bool     scaleToFit  = true;
+    bool     autoRotate  = true;
+};
+
+struct StepRepeatParams {
+    bool     cancelled   = true;
+    std::uint32_t cols   = 2;
+    std::uint32_t rows   = 2;
+    double   sheetWidth  = 0;
+    double   sheetHeight = 0;
+    double   stepX       = 0;   // 0 = auto (= page size)
+    double   stepY       = 0;
+};
+
+struct ShuffleParams {
+    bool     cancelled   = true;
+    aimp::ShuffleMode mode = aimp::ShuffleMode::Signature;
+    std::uint32_t sigSize  = 4;
+};
+
+struct TilePagesParams {
+    bool     cancelled     = true;
+    std::uint32_t cols     = 2;
+    std::uint32_t rows     = 2;
+    double   overlapPoints = 18.0;
+};
+
+struct CreepParams {
+    bool   cancelled        = true;
+    double creepPerSheet    = 1.0;
+    std::uint32_t sheetsInSig = 8;
+};
+
+// ── macOS Cocoa dialog helpers ─────────────────────────────────────────────────
+
+#ifdef MAC_PLATFORM
+
+struct SheetPreset { const char* label; double w; double h; };
+static const SheetPreset kSheetPresets[] = {
+    {"A4 Portrait (595×842pt)",     595.276,  841.890},
+    {"A4 Landscape (842×595pt)",    841.890,  595.276},
+    {"A3 Portrait (842×1191pt)",    841.890, 1190.551},
+    {"A3 Landscape (1191×842pt)", 1190.551,   841.890},
+    {"US Letter Portrait",          612.0,    792.0},
+    {"US Letter Landscape",         792.0,    612.0},
+    {"US Tabloid Portrait",         792.0,   1224.0},
+    {"US Tabloid Landscape",       1224.0,    792.0},
+    {"Match source pages",            0.0,      0.0},
+};
+static constexpr int kSheetPresetCount = 9;
+static constexpr int kSheetMatchIdx    = 8;
+
+static NSView* MakeAccessoryView(CGFloat w, CGFloat h) {
+    return [[NSView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];
+}
+
+static NSTextField* MakeLabel(NSString* text, NSRect frame) {
+    NSTextField* f = [[NSTextField alloc] initWithFrame:frame];
+    [f setStringValue:text];
+    [f setBezeled:NO];
+    [f setDrawsBackground:NO];
+    [f setEditable:NO];
+    [f setSelectable:NO];
+    return f;
+}
+
+static NSTextField* MakeTextField(NSString* value, NSRect frame) {
+    NSTextField* f = [[NSTextField alloc] initWithFrame:frame];
+    [f setStringValue:value];
+    [f setEditable:YES];
+    [f setBezeled:YES];
+    return f;
+}
+
+static NSPopUpButton* MakePopup(NSRect frame) {
+    NSPopUpButton* p = [[NSPopUpButton alloc] initWithFrame:frame pullsDown:NO];
+    return p;
+}
+
+static NSButton* MakeCheckbox(NSString* title, BOOL on, NSRect frame) {
+    NSButton* b = [[NSButton alloc] initWithFrame:frame];
+    [b setButtonType:NSButtonTypeSwitch];
+    [b setTitle:title];
+    [b setState:on ? NSControlStateValueOn : NSControlStateValueOff];
+    return b;
+}
+
+static NSPopUpButton* AddSheetSizePopup(NSView* view, NSRect frame) {
+    NSPopUpButton* p = MakePopup(frame);
+    for (int i = 0; i < kSheetPresetCount; ++i)
+        [p addItemWithTitle:[NSString stringWithUTF8String:kSheetPresets[i].label]];
+    [p selectItemAtIndex:2]; // A3 Portrait default
+    [view addSubview:p];
+    return p;
+}
+
+// Returns {w,h} in points; w==0 means use source page size
+static std::pair<double,double> SheetFromPopup(NSPopUpButton* popup, double fallbackW, double fallbackH) {
+    const NSInteger idx = [popup indexOfSelectedItem];
+    if (idx < 0 || idx >= kSheetPresetCount) return {fallbackW, fallbackH};
+    if (idx == kSheetMatchIdx) return {fallbackW, fallbackH};
+    return {kSheetPresets[idx].w, kSheetPresets[idx].h};
+}
+
+// Booklet dialog
+static BookletParams ShowBookletDialog(double pageW, double pageH) {
+    BookletParams p;
+    @autoreleasepool {
+        const CGFloat W = 360, ROW = 26, GAP = 6, LBL = 130, TOP = 8;
+        // 5 rows
+        NSView* acc = MakeAccessoryView(W, TOP + 5 * (ROW + GAP) + 10);
+
+        auto rowY = [&](int row) -> CGFloat {
+            return TOP + (CGFloat)row * (ROW + GAP);
+        };
+
+        // Row 0: binding
+        [acc addSubview:MakeLabel(@"Binding:", NSMakeRect(0, rowY(4), LBL, ROW))];
+        NSPopUpButton* bindPopup = MakePopup(NSMakeRect(LBL, rowY(4), W-LBL, ROW));
+        [bindPopup addItemWithTitle:@"Left (book opens right)"];
+        [bindPopup addItemWithTitle:@"Right (book opens left)"];
+        [acc addSubview:bindPopup];
+
+        // Row 1: sheet size
+        [acc addSubview:MakeLabel(@"Sheet size:", NSMakeRect(0, rowY(3), LBL, ROW))];
+        NSPopUpButton* sheetPopup = AddSheetSizePopup(acc, NSMakeRect(LBL, rowY(3), W-LBL, ROW));
+        // Select A3 landscape as default for booklet (two A4 pages side by side)
+        [sheetPopup selectItemAtIndex:3];
+
+        // Row 2: signature size
+        [acc addSubview:MakeLabel(@"Signature:", NSMakeRect(0, rowY(2), LBL, ROW))];
+        NSPopUpButton* sigPopup = MakePopup(NSMakeRect(LBL, rowY(2), W-LBL, ROW));
+        [sigPopup addItemWithTitle:@"All pages"];
+        [sigPopup addItemWithTitle:@"4 pages"];
+        [sigPopup addItemWithTitle:@"8 pages"];
+        [sigPopup addItemWithTitle:@"12 pages"];
+        [sigPopup addItemWithTitle:@"16 pages"];
+        [acc addSubview:sigPopup];
+
+        // Row 3: creep
+        [acc addSubview:MakeLabel(@"Creep/sheet (pt):", NSMakeRect(0, rowY(1), LBL, ROW))];
+        NSTextField* creepFld = MakeTextField(@"0", NSMakeRect(LBL, rowY(1)+2, 80, ROW-4));
+        [acc addSubview:creepFld];
+
+        // Row 4: auto-pad
+        NSButton* padChk = MakeCheckbox(@"Pad to multiple of 4", YES, NSMakeRect(0, rowY(0), W, ROW));
+        [acc addSubview:padChk];
+
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Booklet"];
+        [alert setInformativeText:@"Create a saddle-stitched booklet from the active document."];
+        [alert addButtonWithTitle:@"Create Booklet"];
+        [alert addButtonWithTitle:@"Cancel"];
+        [alert setAccessoryView:acc];
+        [alert layout];
+
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
+            p.cancelled = false;
+            p.bindingLeft = ([bindPopup indexOfSelectedItem] == 0);
+            const auto [sw, sh] = SheetFromPopup(sheetPopup, pageW * 2.0, pageH);
+            p.sheetWidth  = sw;
+            p.sheetHeight = sh;
+            const NSInteger si = [sigPopup indexOfSelectedItem];
+            static const std::uint32_t sigSizes[] = {0, 4, 8, 12, 16};
+            p.sigSize = sigSizes[si >= 0 && si <= 4 ? si : 0];
+            p.creepPerSheet = [[creepFld stringValue] doubleValue];
+            p.autoPad = ([padChk state] == NSControlStateValueOn);
+        }
+    }
+    return p;
+}
+
+// N-up dialog
+static NUpParams ShowNUpDialog(double pageW, double pageH) {
+    NUpParams p;
+    @autoreleasepool {
+        const CGFloat W = 360, ROW = 26, GAP = 6, LBL = 130, TOP = 8;
+        NSView* acc = MakeAccessoryView(W, TOP + 5 * (ROW + GAP) + 10);
+
+        auto rowY = [&](int row) -> CGFloat { return TOP + (CGFloat)row * (ROW + GAP); };
+
+        [acc addSubview:MakeLabel(@"Columns:", NSMakeRect(0, rowY(4), LBL, ROW))];
+        NSTextField* colFld = MakeTextField(@"2", NSMakeRect(LBL, rowY(4)+2, 60, ROW-4));
+        [acc addSubview:colFld];
+
+        [acc addSubview:MakeLabel(@"Rows:", NSMakeRect(0, rowY(3), LBL, ROW))];
+        NSTextField* rowFld = MakeTextField(@"2", NSMakeRect(LBL, rowY(3)+2, 60, ROW-4));
+        [acc addSubview:rowFld];
+
+        [acc addSubview:MakeLabel(@"Sheet size:", NSMakeRect(0, rowY(2), LBL, ROW))];
+        NSPopUpButton* sheetPopup = AddSheetSizePopup(acc, NSMakeRect(LBL, rowY(2), W-LBL, ROW));
+
+        NSButton* scaleChk = MakeCheckbox(@"Scale pages to fit slot", YES,
+                                           NSMakeRect(0, rowY(1), W, ROW));
+        [acc addSubview:scaleChk];
+
+        NSButton* rotChk = MakeCheckbox(@"Auto-rotate to fit", YES,
+                                         NSMakeRect(0, rowY(0), W, ROW));
+        [acc addSubview:rotChk];
+
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"N-up Pages"];
+        [alert setInformativeText:@"Place multiple source pages on each output sheet."];
+        [alert addButtonWithTitle:@"Create N-up"];
+        [alert addButtonWithTitle:@"Cancel"];
+        [alert setAccessoryView:acc];
+        [alert layout];
+
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
+            p.cancelled = false;
+            p.cols = (std::uint32_t)std::max((NSInteger)1, [[colFld stringValue] integerValue]);
+            p.rows = (std::uint32_t)std::max((NSInteger)1, [[rowFld stringValue] integerValue]);
+            const auto [sw, sh] = SheetFromPopup(sheetPopup,
+                                                  pageW * (double)p.cols,
+                                                  pageH * (double)p.rows);
+            p.sheetWidth  = sw;
+            p.sheetHeight = sh;
+            p.scaleToFit = ([scaleChk state] == NSControlStateValueOn);
+            p.autoRotate = ([rotChk state]   == NSControlStateValueOn);
+        }
+    }
+    return p;
+}
+
+// Step & Repeat dialog
+static StepRepeatParams ShowStepRepeatDialog(double pageW, double pageH) {
+    StepRepeatParams p;
+    @autoreleasepool {
+        const CGFloat W = 360, ROW = 26, GAP = 6, LBL = 140, TOP = 8;
+        NSView* acc = MakeAccessoryView(W, TOP + 5 * (ROW + GAP) + 10);
+
+        auto rowY = [&](int row) -> CGFloat { return TOP + (CGFloat)row * (ROW + GAP); };
+
+        [acc addSubview:MakeLabel(@"Repeat columns:", NSMakeRect(0, rowY(4), LBL, ROW))];
+        NSTextField* colFld = MakeTextField(@"2", NSMakeRect(LBL, rowY(4)+2, 60, ROW-4));
+        [acc addSubview:colFld];
+
+        [acc addSubview:MakeLabel(@"Repeat rows:", NSMakeRect(0, rowY(3), LBL, ROW))];
+        NSTextField* rowFld = MakeTextField(@"2", NSMakeRect(LBL, rowY(3)+2, 60, ROW-4));
+        [acc addSubview:rowFld];
+
+        [acc addSubview:MakeLabel(@"Sheet size:", NSMakeRect(0, rowY(2), LBL, ROW))];
+        NSPopUpButton* sheetPopup = AddSheetSizePopup(acc, NSMakeRect(LBL, rowY(2), W-LBL, ROW));
+        [sheetPopup selectItemAtIndex:kSheetMatchIdx]; // match source by default
+
+        [acc addSubview:MakeLabel(@"Step X (pt, 0=auto):", NSMakeRect(0, rowY(1), LBL, ROW))];
+        NSTextField* stepXFld = MakeTextField(@"0", NSMakeRect(LBL, rowY(1)+2, 60, ROW-4));
+        [acc addSubview:stepXFld];
+
+        [acc addSubview:MakeLabel(@"Step Y (pt, 0=auto):", NSMakeRect(0, rowY(0), LBL, ROW))];
+        NSTextField* stepYFld = MakeTextField(@"0", NSMakeRect(LBL, rowY(0)+2, 60, ROW-4));
+        [acc addSubview:stepYFld];
+
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Step & Repeat"];
+        [alert setInformativeText:@"Repeat one page in a regular grid."];
+        [alert addButtonWithTitle:@"Create Step & Repeat"];
+        [alert addButtonWithTitle:@"Cancel"];
+        [alert setAccessoryView:acc];
+        [alert layout];
+
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
+            p.cancelled = false;
+            p.cols = (std::uint32_t)std::max((NSInteger)1, [[colFld stringValue] integerValue]);
+            p.rows = (std::uint32_t)std::max((NSInteger)1, [[rowFld stringValue] integerValue]);
+            const auto [sw, sh] = SheetFromPopup(sheetPopup,
+                                                  pageW * (double)p.cols,
+                                                  pageH * (double)p.rows);
+            p.sheetWidth  = sw;
+            p.sheetHeight = sh;
+            const double sx = [[stepXFld stringValue] doubleValue];
+            const double sy = [[stepYFld stringValue] doubleValue];
+            p.stepX = (sx > 0) ? sx : pageW;
+            p.stepY = (sy > 0) ? sy : pageH;
+        }
+    }
+    return p;
+}
+
+// Shuffle Pages dialog
+static ShuffleParams ShowShuffleDialog() {
+    ShuffleParams p;
+    @autoreleasepool {
+        const CGFloat W = 340, ROW = 26, GAP = 6, LBL = 140, TOP = 8;
+        NSView* acc = MakeAccessoryView(W, TOP + 2 * (ROW + GAP) + 10);
+
+        auto rowY = [&](int row) -> CGFloat { return TOP + (CGFloat)row * (ROW + GAP); };
+
+        [acc addSubview:MakeLabel(@"Shuffle mode:", NSMakeRect(0, rowY(1), LBL, ROW))];
+        NSPopUpButton* modePopup = MakePopup(NSMakeRect(LBL, rowY(1), W-LBL, ROW));
+        [modePopup addItemWithTitle:@"Saddle Stitch (Signature)"];
+        [modePopup addItemWithTitle:@"Perfect Bound"];
+        [modePopup addItemWithTitle:@"Split Even/Odd"];
+        [modePopup addItemWithTitle:@"Interleave"];
+        [acc addSubview:modePopup];
+
+        [acc addSubview:MakeLabel(@"Signature size:", NSMakeRect(0, rowY(0), LBL, ROW))];
+        NSPopUpButton* sigPopup = MakePopup(NSMakeRect(LBL, rowY(0), W-LBL, ROW));
+        [sigPopup addItemWithTitle:@"4 pages"];
+        [sigPopup addItemWithTitle:@"8 pages"];
+        [sigPopup addItemWithTitle:@"12 pages"];
+        [sigPopup addItemWithTitle:@"16 pages"];
+        [acc addSubview:sigPopup];
+
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Shuffle Pages"];
+        [alert setInformativeText:@"Reorder pages for booklet or duplex printing."];
+        [alert addButtonWithTitle:@"Shuffle & Compose"];
+        [alert addButtonWithTitle:@"Cancel"];
+        [alert setAccessoryView:acc];
+        [alert layout];
+
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
+            p.cancelled = false;
+            const NSInteger mi = [modePopup indexOfSelectedItem];
+            static const aimp::ShuffleMode modes[] = {
+                aimp::ShuffleMode::Signature,
+                aimp::ShuffleMode::PerfectBound,
+                aimp::ShuffleMode::EvenOdd,
+                aimp::ShuffleMode::Interleave,
+            };
+            p.mode = modes[mi >= 0 && mi < 4 ? mi : 0];
+            static const std::uint32_t sigSizes[] = {4, 8, 12, 16};
+            const NSInteger si = [sigPopup indexOfSelectedItem];
+            p.sigSize = sigSizes[si >= 0 && si < 4 ? si : 0];
+        }
+    }
+    return p;
+}
+
+// Tile Pages dialog
+static TilePagesParams ShowTilePagesDialog() {
+    TilePagesParams p;
+    @autoreleasepool {
+        const CGFloat W = 320, ROW = 26, GAP = 6, LBL = 130, TOP = 8;
+        NSView* acc = MakeAccessoryView(W, TOP + 3 * (ROW + GAP) + 10);
+
+        auto rowY = [&](int row) -> CGFloat { return TOP + (CGFloat)row * (ROW + GAP); };
+
+        [acc addSubview:MakeLabel(@"Tile columns:", NSMakeRect(0, rowY(2), LBL, ROW))];
+        NSTextField* colFld = MakeTextField(@"2", NSMakeRect(LBL, rowY(2)+2, 60, ROW-4));
+        [acc addSubview:colFld];
+
+        [acc addSubview:MakeLabel(@"Tile rows:", NSMakeRect(0, rowY(1), LBL, ROW))];
+        NSTextField* rowFld = MakeTextField(@"2", NSMakeRect(LBL, rowY(1)+2, 60, ROW-4));
+        [acc addSubview:rowFld];
+
+        [acc addSubview:MakeLabel(@"Overlap (pt):", NSMakeRect(0, rowY(0), LBL, ROW))];
+        NSTextField* overlapFld = MakeTextField(@"18", NSMakeRect(LBL, rowY(0)+2, 60, ROW-4));
+        [acc addSubview:overlapFld];
+
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Tile Pages"];
+        [alert setInformativeText:@"Split large pages into smaller tile sheets."];
+        [alert addButtonWithTitle:@"Create Tiles"];
+        [alert addButtonWithTitle:@"Cancel"];
+        [alert setAccessoryView:acc];
+        [alert layout];
+
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
+            p.cancelled = false;
+            p.cols = (std::uint32_t)std::max((NSInteger)1, [[colFld stringValue] integerValue]);
+            p.rows = (std::uint32_t)std::max((NSInteger)1, [[rowFld stringValue] integerValue]);
+            p.overlapPoints = [[overlapFld stringValue] doubleValue];
+        }
+    }
+    return p;
+}
+
+// Creep dialog
+static CreepParams ShowCreepDialog() {
+    CreepParams p;
+    @autoreleasepool {
+        const CGFloat W = 320, ROW = 26, GAP = 6, LBL = 160, TOP = 8;
+        NSView* acc = MakeAccessoryView(W, TOP + 2 * (ROW + GAP) + 10);
+
+        auto rowY = [&](int row) -> CGFloat { return TOP + (CGFloat)row * (ROW + GAP); };
+
+        [acc addSubview:MakeLabel(@"Creep per sheet (pt):", NSMakeRect(0, rowY(1), LBL, ROW))];
+        NSTextField* creepFld = MakeTextField(@"1.0", NSMakeRect(LBL, rowY(1)+2, 60, ROW-4));
+        [acc addSubview:creepFld];
+
+        [acc addSubview:MakeLabel(@"Sheets in signature:", NSMakeRect(0, rowY(0), LBL, ROW))];
+        NSTextField* sheetsFld = MakeTextField(@"8", NSMakeRect(LBL, rowY(0)+2, 60, ROW-4));
+        [acc addSubview:sheetsFld];
+
+        NSAlert* alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Creep"];
+        [alert setInformativeText:@"Apply creep correction for booklet binding."];
+        [alert addButtonWithTitle:@"Apply Creep"];
+        [alert addButtonWithTitle:@"Cancel"];
+        [alert setAccessoryView:acc];
+        [alert layout];
+
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
+            p.cancelled = false;
+            p.creepPerSheet = [[creepFld stringValue] doubleValue];
+            p.sheetsInSig = (std::uint32_t)std::max((NSInteger)1, [[sheetsFld stringValue] integerValue]);
+        }
+    }
+    return p;
+}
+
+#endif // MAC_PLATFORM
+
+// ── Execute functions ─────────────────────────────────────────────────────────
+
+// Helper: get active PDDoc or show error
+static PDDoc GetActiveDocOrError(const char* ctx) {
+    AVDoc av = AVAppGetActiveDoc();
+    if (!av) { ShowInfoDialog(std::string("Open a PDF in Acrobat first (") + ctx + ")."); return nullptr; }
+    PDDoc pd = AVDocGetPDDoc(av);
+    if (!pd) { ShowInfoDialog("No valid PDDoc available."); return nullptr; }
+    if (PDDocGetNumPages(pd) <= 0) { ShowInfoDialog("Document has no pages."); return nullptr; }
+    return pd;
+}
+
+// Helper: save imposition params as "last action" JSON
+static void SaveLastAction(const std::string& actionType, const std::string& paramsJson) {
+    std::ofstream out(GetLastActionPath());
+    if (out) {
+        out << "{\n  \"action\": \"" << actionType << "\",\n"
+            << "  \"params\": " << paramsJson << "\n}\n";
+    }
+}
+
+// ── Control Panel ──────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteControlPanel(void*) {
     DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat om een booklet van te maken.");
-            E_RTRN_VOID;
-        }
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
-
-        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        if (pageCount <= 0) {
-            ShowInfoDialog("Het document bevat geen pagina's.");
-            E_RTRN_VOID;
-        }
-
-        double pageW = 595.276;
-        double pageH = 841.890;
-        GetFirstPageDimensions(pdDoc, pageW, pageH);
-
-        // Sheet is two page-widths wide (landscape booklet spread).
-        const aimp::SheetSize sheetSize { pageW * 2.0, pageH };
-
-        aimp::BuildOptions opts {};
-        opts.scaleToFit       = false;
-        opts.autoRotateToFit  = false;
-        opts.padToMultiple    = 4;
-
-        const auto plan = aimp::BookletPlanner::Build(
-            "active-document",
-            static_cast<std::uint32_t>(pageCount),
-            sheetSize,
-            opts
-        );
-
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) { ShowInfoDialog("Kan temp map niet bepalen."); E_RTRN_VOID; }
-
-        const auto outputPath = (tempDir / ("imposr-booklet-" + BuildUtcTimestamp() + ".pdf")).string();
-        std::string composeError;
-        if (!NativeComposePlan(pdDoc, plan, outputPath, composeError)) {
-            ShowInfoDialog("Booklet aanmaken mislukt:\n" + composeError);
-            E_RTRN_VOID;
-        }
-
-        const std::size_t sheetCountResult = plan.placements.empty() ? 0u :
-            static_cast<std::size_t>(plan.placements.back().sheetIndex) + 1u;
-
-        OpenPdfInAcrobat(outputPath);
-        std::ostringstream msg;
-        msg << "Booklet gemaakt (" << pageCount << " pagina's, "
-            << sheetCountResult << " vellen).\n\n" << outputPath;
-        ShowInfoDialog(msg.str());
+#ifdef MAC_PLATFORM
+    ShowControlPanel();
+#else
+    ShowInfoDialog("Imposition Control Panel — use the Imposition menu to access features.");
+#endif
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij Create Booklet.");
+        ShowInfoDialog("Error opening Control Panel.");
     END_HANDLER
 }
 
-// ── N-Up Pages ─────────────────────────────────────────────────────────────
-// Default: 2×2 n-up on a sheet twice the source page size.
-ACCB1 void ACCB2 ExecuteNUpPages(void* clientData) {
+// ── Booklet ────────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteBooklet(void*) {
     DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat voor N-Up.");
-            E_RTRN_VOID;
-        }
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
+        PDDoc pdDoc = GetActiveDocOrError("Booklet");
+        if (!pdDoc) E_RTRN_VOID;
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        if (pageCount <= 0) {
-            ShowInfoDialog("Het document bevat geen pagina's.");
-            E_RTRN_VOID;
-        }
-
-        double pageW = 595.276;
-        double pageH = 841.890;
+        double pageW = 595.276, pageH = 841.890;
         GetFirstPageDimensions(pdDoc, pageW, pageH);
 
-        constexpr std::uint32_t cols = 2u;
-        constexpr std::uint32_t rows = 2u;
-        const aimp::SheetSize sheetSize { pageW * cols, pageH * rows };
-
+#ifdef MAC_PLATFORM
+        const BookletParams dlg = ShowBookletDialog(pageW, pageH);
+        if (dlg.cancelled) E_RTRN_VOID;
+        const double shW = (dlg.sheetWidth  > 0) ? dlg.sheetWidth  : pageW * 2.0;
+        const double shH = (dlg.sheetHeight > 0) ? dlg.sheetHeight : pageH;
+        const double creep = dlg.creepPerSheet;
+        const bool   autoPad = dlg.autoPad;
+#else
+        const double shW = pageW * 2.0, shH = pageH;
+        const double creep = 0.0;
+        const bool autoPad = true;
+#endif
+        const aimp::SheetSize sheetSize {shW, shH};
         aimp::BuildOptions opts {};
-        opts.scaleToFit      = true;
-        opts.autoRotateToFit = true;
+        opts.scaleToFit      = false;
+        opts.autoRotateToFit = false;
+        opts.padToMultiple   = autoPad ? 4u : 0u;
+        opts.bookletCreepPerSheetPoints = creep;
+
+        const auto plan = aimp::BookletPlanner::Build(
+            "active-document", (std::uint32_t)pageCount, sheetSize, opts);
+
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-booklet-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Booklet failed:\n" + err); E_RTRN_VOID;
+        }
+        const std::size_t sheets = plan.placements.empty() ? 0u :
+            (std::size_t)plan.placements.back().sheetIndex + 1u;
+        SaveLastAction("booklet",
+            "{\"pages\":" + std::to_string(pageCount) +
+            ",\"sheetW\":" + std::to_string(shW) +
+            ",\"sheetH\":" + std::to_string(shH) + "}");
+        OpenPdfInAcrobat(outPath);
+        std::ostringstream msg;
+        msg << "Booklet created: " << pageCount << " pages, " << sheets << " sheets.\n" << outPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Error in Booklet.");
+    END_HANDLER
+}
+
+// ── N-up Pages ─────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteNUpPages(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("N-up");
+        if (!pdDoc) E_RTRN_VOID;
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+#ifdef MAC_PLATFORM
+        const NUpParams dlg = ShowNUpDialog(pageW, pageH);
+        if (dlg.cancelled) E_RTRN_VOID;
+        const std::uint32_t cols = dlg.cols, rows = dlg.rows;
+        const double shW = (dlg.sheetWidth  > 0) ? dlg.sheetWidth  : pageW * cols;
+        const double shH = (dlg.sheetHeight > 0) ? dlg.sheetHeight : pageH * rows;
+        const bool scale = dlg.scaleToFit, rot = dlg.autoRotate;
+#else
+        constexpr std::uint32_t cols = 2, rows = 2;
+        const double shW = pageW * cols, shH = pageH * rows;
+        const bool scale = true, rot = true;
+#endif
+        const aimp::SheetSize sheetSize {shW, shH};
+        aimp::BuildOptions opts {};
+        opts.scaleToFit             = scale;
+        opts.autoRotateToFit        = rot;
         opts.sourcePageWidthPoints  = pageW;
         opts.sourcePageHeightPoints = pageH;
 
         const auto plan = aimp::NUpPlanner::Build(
-            "active-document",
-            static_cast<std::uint32_t>(pageCount),
-            sheetSize,
-            cols,
-            rows,
-            opts
-        );
+            "active-document", (std::uint32_t)pageCount, sheetSize, cols, rows, opts);
 
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) { ShowInfoDialog("Kan temp map niet bepalen."); E_RTRN_VOID; }
-
-        const auto outputPath = (tempDir / ("imposr-nup-" + BuildUtcTimestamp() + ".pdf")).string();
-        std::string composeError;
-        if (!NativeComposePlan(pdDoc, plan, outputPath, composeError)) {
-            ShowInfoDialog("N-Up aanmaken mislukt:\n" + composeError);
-            E_RTRN_VOID;
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-nup-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("N-up failed:\n" + err); E_RTRN_VOID;
         }
-
-        const std::size_t sheetCountResult = plan.placements.empty() ? 0u :
-            static_cast<std::size_t>(plan.placements.back().sheetIndex) + 1u;
-
-        OpenPdfInAcrobat(outputPath);
+        const std::size_t sheets = plan.placements.empty() ? 0u :
+            (std::size_t)plan.placements.back().sheetIndex + 1u;
+        SaveLastAction("nup",
+            "{\"cols\":" + std::to_string(cols) +
+            ",\"rows\":" + std::to_string(rows) +
+            ",\"sheetW\":" + std::to_string(shW) +
+            ",\"sheetH\":" + std::to_string(shH) + "}");
+        OpenPdfInAcrobat(outPath);
         std::ostringstream msg;
-        msg << cols << "×" << rows << " N-Up gemaakt ("
-            << pageCount << " pagina's, " << sheetCountResult << " vellen).\n\n" << outputPath;
+        msg << cols << "×" << rows << " N-up: " << pageCount << " pages, " << sheets << " sheets.\n" << outPath;
         ShowInfoDialog(msg.str());
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij N-Up Pages.");
+        ShowInfoDialog("Error in N-up Pages.");
     END_HANDLER
 }
 
-// ── Step & Repeat ──────────────────────────────────────────────────────────
-// Default: 2×2 repetition of page 1 on a sheet twice the page size.
-ACCB1 void ACCB2 ExecuteStepAndRepeat(void* clientData) {
+// ── Step & Repeat ──────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteStepAndRepeat(void*) {
     DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat voor Step & Repeat.");
-            E_RTRN_VOID;
-        }
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
+        PDDoc pdDoc = GetActiveDocOrError("Step & Repeat");
+        if (!pdDoc) E_RTRN_VOID;
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        if (pageCount <= 0) {
-            ShowInfoDialog("Het document bevat geen pagina's.");
-            E_RTRN_VOID;
-        }
-
-        double pageW = 595.276;
-        double pageH = 841.890;
+        double pageW = 595.276, pageH = 841.890;
         GetFirstPageDimensions(pdDoc, pageW, pageH);
 
-        constexpr std::uint32_t cols = 2u;
-        constexpr std::uint32_t rows = 2u;
-        const aimp::SheetSize sheetSize { pageW * cols, pageH * rows };
-
-        aimp::StepRepeatConfig stepCfg {};
-        stepCfg.repeatX      = cols;
-        stepCfg.repeatY      = rows;
-        stepCfg.stepXPoints  = pageW;
-        stepCfg.stepYPoints  = pageH;
-        stepCfg.seedRect     = { 0.0, 0.0, pageW, pageH };
+#ifdef MAC_PLATFORM
+        const StepRepeatParams dlg = ShowStepRepeatDialog(pageW, pageH);
+        if (dlg.cancelled) E_RTRN_VOID;
+        const std::uint32_t cols = dlg.cols, rows = dlg.rows;
+        const double shW  = (dlg.sheetWidth  > 0) ? dlg.sheetWidth  : pageW * cols;
+        const double shH  = (dlg.sheetHeight > 0) ? dlg.sheetHeight : pageH * rows;
+        const double stepX = dlg.stepX, stepY = dlg.stepY;
+#else
+        constexpr std::uint32_t cols = 2, rows = 2;
+        const double shW = pageW * cols, shH = pageH * rows;
+        const double stepX = pageW, stepY = pageH;
+#endif
+        const aimp::SheetSize sheetSize {shW, shH};
+        aimp::StepRepeatConfig cfg {};
+        cfg.repeatX     = cols;
+        cfg.repeatY     = rows;
+        cfg.stepXPoints = stepX;
+        cfg.stepYPoints = stepY;
+        cfg.seedRect    = {0.0, 0.0, pageW, pageH};
 
         aimp::BuildOptions opts {};
         opts.scaleToFit             = true;
@@ -1380,859 +1291,749 @@ ACCB1 void ACCB2 ExecuteStepAndRepeat(void* clientData) {
         opts.sourcePageHeightPoints = pageH;
 
         const auto plan = aimp::StepAndRepeatPlanner::Build(
-            "active-document",
-            static_cast<std::uint32_t>(pageCount),
-            sheetSize,
-            stepCfg,
-            opts
-        );
+            "active-document", (std::uint32_t)pageCount, sheetSize, cfg, opts);
 
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) { ShowInfoDialog("Kan temp map niet bepalen."); E_RTRN_VOID; }
-
-        const auto outputPath = (tempDir / ("imposr-steprepeat-" + BuildUtcTimestamp() + ".pdf")).string();
-        std::string composeError;
-        if (!NativeComposePlan(pdDoc, plan, outputPath, composeError)) {
-            ShowInfoDialog("Step & Repeat mislukt:\n" + composeError);
-            E_RTRN_VOID;
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-steprepeat-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Step & Repeat failed:\n" + err); E_RTRN_VOID;
         }
-
-        const std::size_t sheetCountResult = plan.placements.empty() ? 0u :
-            static_cast<std::size_t>(plan.placements.back().sheetIndex) + 1u;
-
-        OpenPdfInAcrobat(outputPath);
+        const std::size_t sheets = plan.placements.empty() ? 0u :
+            (std::size_t)plan.placements.back().sheetIndex + 1u;
+        SaveLastAction("steprepeat",
+            "{\"cols\":" + std::to_string(cols) +
+            ",\"rows\":" + std::to_string(rows) + "}");
+        OpenPdfInAcrobat(outPath);
         std::ostringstream msg;
-        msg << "Step & Repeat gemaakt (" << cols << "×" << rows
-            << ", " << pageCount << " bronpagina's, "
-            << sheetCountResult << " vellen).\n\n" << outputPath;
+        msg << cols << "×" << rows << " Step & Repeat: " << pageCount
+            << " pages, " << sheets << " sheets.\n" << outPath;
         ShowInfoDialog(msg.str());
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij Step & Repeat.");
+        ShowInfoDialog("Error in Step & Repeat.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecuteTwoUpDemo(void* clientData) {
-    DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RTRN_VOID;
-        }
+// ── Join 2 Pages ───────────────────────────────────────────────────────────────
 
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
+ACCB1 void ACCB2 ExecuteJoin2Pages(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("Join 2 Pages");
+        if (!pdDoc) E_RTRN_VOID;
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        const aimp::SheetSize outputSheet {1190.55, 841.89}; // A3 landscape in points
-        const auto plan = aimp::TwoUpPlanner::Build("active-document", static_cast<std::uint32_t>(pageCount), outputSheet);
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
 
-        std::string message = "2-Up demo plan gemaakt.\n\nPagina's: ";
-        message += std::to_string(pageCount);
-        message += "\nSheets: ";
-        message += std::to_string((plan.placements.size() + 1) / 2);
-        message += "\n\nVolgende stap: compose output PDF.";
+        // Two-up: side-by-side, preserve order
+        const aimp::SheetSize sheetSize {pageW * 2.0, pageH};
+        aimp::BuildOptions opts {};
+        opts.scaleToFit      = false;
+        opts.autoRotateToFit = false;
+        opts.padToMultiple   = 2u;
 
-        ShowInfoDialog(message);
+        const auto plan = aimp::TwoUpPlanner::Build(
+            "active-document", (std::uint32_t)pageCount, sheetSize, opts);
+
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-join2-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Join 2 pages failed:\n" + err); E_RTRN_VOID;
+        }
+        const std::size_t sheets = plan.placements.empty() ? 0u :
+            (std::size_t)plan.placements.back().sheetIndex + 1u;
+        OpenPdfInAcrobat(outPath);
+        std::ostringstream msg;
+        msg << "Join 2 pages: " << sheets << " spreads.\n" << outPath;
+        ShowInfoDialog(msg.str());
     HANDLER
-        ShowInfoDialog("Er trad een fout op tijdens de 2-Up demo.");
+        ShowInfoDialog("Error in Join 2 Pages.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePresetSave(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        BuildDefaultPreset(preset);
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon preset niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog("Preset opgeslagen:\n" + presetPath);
-    HANDLER
-        ShowInfoDialog("Er trad een fout op bij preset opslaan.");
-    END_HANDLER
-}
+// ── Shuffle Pages ──────────────────────────────────────────────────────────────
 
-ACCB1 void ACCB2 ExecutePresetPreview(void* clientData) {
+ACCB1 void ACCB2 ExecuteShufflePages(void*) {
     DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RTRN_VOID;
-        }
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
-
-        aimp::PlannerPreset preset {};
-        std::string error;
-        if (!aimp::LoadPreset(GetPresetPath(), preset, error)) {
-            BuildDefaultPreset(preset);
-        }
+        PDDoc pdDoc = GetActiveDocOrError("Shuffle Pages");
+        if (!pdDoc) E_RTRN_VOID;
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        aimp::ImpositionPlan plan {};
-        std::string modeLabel;
-        if (!BuildPlanFromPreset(preset, static_cast<std::uint32_t>(pageCount), plan, modeLabel)) {
-            ShowInfoDialog("Kon geen plan opbouwen uit preset.");
-            E_RTRN_VOID;
-        }
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
 
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) {
-            ShowInfoDialog("Kan temp map niet bepalen.");
-            E_RTRN_VOID;
-        }
+#ifdef MAC_PLATFORM
+        const ShuffleParams dlg = ShowShuffleDialog();
+        if (dlg.cancelled) E_RTRN_VOID;
+        const aimp::ShuffleMode mode = dlg.mode;
+        const std::uint32_t sigSize  = dlg.sigSize;
+#else
+        const aimp::ShuffleMode mode = aimp::ShuffleMode::Signature;
+        const std::uint32_t sigSize  = 4;
+#endif
+        std::vector<std::uint32_t> inputPages;
+        inputPages.reserve((std::size_t)pageCount);
+        for (std::uint32_t i = 0; i < (std::uint32_t)pageCount; ++i) inputPages.push_back(i);
 
-        const auto previewPath = (tempDir / ("acrobat-imposition-preview-" + BuildUtcTimestamp() + ".pdf")).string();
-        if (!aimp::ComposePlanPdf(plan, previewPath, preset.pdfOptions, error)) {
-            ShowInfoDialog("Kon preview PDF niet maken: " + error);
-            E_RTRN_VOID;
-        }
+        aimp::ShuffleConfig cfg {};
+        cfg.mode          = mode;
+        cfg.signatureSize = sigSize;
+        const auto result = aimp::ShufflePages(inputPages, cfg);
 
-        ShowInfoDialog("Preview gemaakt (" + modeLabel + "):\n" + previewPath);
+        const auto plan = BuildReorderPlan("active-document",
+                                            result.orderedPages, pageW, pageH);
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-shuffle-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Shuffle Pages failed:\n" + err); E_RTRN_VOID;
+        }
+        SaveLastAction("shuffle", "{\"mode\":\"" + std::to_string((int)mode) + "\"}");
+        OpenPdfInAcrobat(outPath);
+        std::ostringstream msg;
+        msg << "Shuffle Pages: " << pageCount << " → " << result.orderedPages.size()
+            << " pages (" << result.blankPagesAdded << " blank added).\n" << outPath;
+        ShowInfoDialog(msg.str());
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij preview.");
+        ShowInfoDialog("Error in Shuffle Pages.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePresetRunBundle(void* clientData) {
-    DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RTRN_VOID;
-        }
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
+// ── Shuffle Even/Odd ───────────────────────────────────────────────────────────
 
-        aimp::PlannerPreset preset {};
-        std::string error;
-        if (!aimp::LoadPreset(GetPresetPath(), preset, error)) {
-            BuildDefaultPreset(preset);
-        }
+ACCB1 void ACCB2 ExecuteShuffleEvenOdd(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("Shuffle Even/Odd");
+        if (!pdDoc) E_RTRN_VOID;
 
         const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        aimp::ImpositionPlan plan {};
-        std::string modeLabel;
-        if (!BuildPlanFromPreset(preset, static_cast<std::uint32_t>(pageCount), plan, modeLabel)) {
-            ShowInfoDialog("Kon geen plan opbouwen uit preset.");
-            E_RTRN_VOID;
-        }
-        const auto validationIssues = aimp::ValidatePlan(plan);
-        if (preset.pdfOptions.failOnValidationIssues && !validationIssues.empty()) {
-            std::ostringstream message;
-            message << "Validatie gefaald (" << validationIssues.size() << " issues):\n";
-            for (const auto& issue : validationIssues) {
-                message << "- " << issue.code << ": " << issue.message << '\n';
-            }
-            ShowInfoDialog(message.str());
-            E_RTRN_VOID;
-        }
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
 
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) {
-            ShowInfoDialog("Kan temp map niet bepalen.");
-            E_RTRN_VOID;
-        }
-        const std::string stamp = BuildUtcTimestamp();
-        std::filesystem::path outputRoot = tempDir;
-        if (!preset.outputDirectory.empty()) {
-            outputRoot = std::filesystem::path(preset.outputDirectory);
-        }
-        const std::string outputStem = preset.outputStem.empty()
-            ? std::string {"acrobat-imposition-run"}
-            : preset.outputStem;
-        const auto base = outputRoot / (outputStem + "-" + stamp);
-        std::filesystem::create_directories(base, fsError);
-        if (fsError) {
-            ShowInfoDialog("Kan output map niet maken.");
-            E_RTRN_VOID;
-        }
+        std::vector<std::uint32_t> inputPages;
+        for (std::uint32_t i = 0; i < (std::uint32_t)pageCount; ++i) inputPages.push_back(i);
+        const auto [evens, odds] = aimp::SplitEvenOdd(inputPages);
+        const auto merged = aimp::MergeInterlace(evens, odds);
+        const auto plan = BuildReorderPlan("active-document", merged, pageW, pageH);
 
-        const auto planPath = (base / "plan.json").string();
-        const auto manifestPath = (base / "manifest.json").string();
-        const auto auditPath = (base / "audit.xml").string();
-        const auto acrobatJsPath = (base / "placement.js").string();
-        const auto acrobatJsRunnerPath = (base / "placement-runner.js").string();
-        const auto sdkOpsPath = (base / "sdk-ops.json").string();
-        const auto xobjectComposePath = (base / "xobject-compose.json").string();
-        const auto compositionPath = (base / "production-composition.json").string();
-        const auto panelControlPath = (base / "control-surface.json").string();
-        const auto proofPath = (base / "proof.pdf").string();
-        const auto imposedOutputPath = (base / "imposed-output.pdf").string();
-        const auto preflightPath = (base / "preflight.json").string();
-        const auto panelStatePath = (base / "panel-state.json").string();
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-evenodd-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Shuffle Even/Odd failed:\n" + err); E_RTRN_VOID;
+        }
+        OpenPdfInAcrobat(outPath);
+        ShowInfoDialog("Shuffle Even/Odd complete.\n" + outPath);
+    HANDLER
+        ShowInfoDialog("Error in Shuffle Even/Odd.");
+    END_HANDLER
+}
 
-        {
-            std::ofstream out(planPath);
-            out << aimp::ToJson(plan);
-        }
-        {
-            std::ofstream out(manifestPath);
-            out << aimp::ToPlacementManifestJson(plan);
-        }
-        {
-            std::ofstream out(auditPath);
-            out << aimp::ToAuditXml(plan);
-        }
-        {
-            std::ofstream out(acrobatJsPath);
-            out << aimp::ToAcrobatPlacementJs(plan);
-        }
-        {
-            std::ofstream out(acrobatJsRunnerPath);
-            out << "/* Generated helper runner for Acrobat-JS multi-placement fallback */\n";
-            out << "/* Set sourcePdfPath to the original source document path before running. */\n";
-            out << "var sourcePdfPath = 'REPLACE_WITH_SOURCE_PDF_PATH';\n";
-            out << "var outputPdfPath = '" << imposedOutputPath << "';\n";
-            out << "if (typeof runAimpPlacementWithAcrobatJs !== 'function') {\n";
-            out << "  console.println('Load placement.js first, then rerun this script.');\n";
-            out << "} else {\n";
-            out << "  runAimpPlacementWithAcrobatJs(sourcePdfPath, outputPdfPath);\n";
-            out << "}\n";
-        }
-        {
-            std::ofstream out(sdkOpsPath);
-            out << aimp::ToAcrobatSdkOpsJson(plan);
-        }
-        {
-            std::ofstream out(xobjectComposePath);
-            out << aimp::ToAcrobatXObjectComposeJson(plan);
-        }
-        {
-            std::ofstream out(compositionPath);
-            out << aimp::ToProductionCompositionJson(plan, preset.buildOptions, preset.pdfOptions);
-        }
-        {
-            std::ofstream out(panelControlPath);
-            out << BuildPanelControlSurfaceJson(preset);
-        }
-        if (!aimp::ComposePlanPdf(plan, proofPath, preset.pdfOptions, error)) {
-            ShowInfoDialog("Kon proof PDF niet maken: " + error);
-            E_RTRN_VOID;
-        }
-        {
-            const auto preflight = aimp::ValidatePrepressReadiness(plan, preset.pdfOptions);
-            std::size_t preflightErrorCount = 0;
-            for (const auto& issue : preflight) {
-                if (issue.isError) {
-                    ++preflightErrorCount;
-                }
-            }
-            if (preset.pdfOptions.failOnPreflightErrors && preflightErrorCount > 0) {
-                std::ostringstream message;
-                message << "Preflight gefaald (" << preflightErrorCount << " fouten):\n";
-                for (const auto& issue : preflight) {
-                    message << "- " << (issue.isError ? "ERROR " : "WARN ") << issue.code << ": " << issue.message << '\n';
-                }
-                ShowInfoDialog(message.str());
-                E_RTRN_VOID;
-            }
-            std::ofstream out(preflightPath);
-            out << aimp::ToPreflightJson(preflight);
-            std::ofstream panelOut(panelStatePath);
-            panelOut << BuildPanelStateJson(modeLabel,
-                                            preset,
-                                            validationIssues.size(),
-                                            preflight.size(),
-                                            preflightErrorCount,
-                                            base.string(),
-                                            proofPath,
-                                            imposedOutputPath);
-            std::string globalPanelStatePath;
-            SavePanelState(modeLabel,
-                           preset,
-                           validationIssues.size(),
-                           preflight.size(),
-                           preflightErrorCount,
-                           base.string(),
-                           proofPath,
-                           imposedOutputPath,
-                           globalPanelStatePath);
-        }
+// ── Reverse Pages ─────────────────────────────────────────────────────────────
 
-        ASFileSys defFS1 = ASGetDefaultFileSys();
-        ASPathName proofASPath = ASFileSysCreatePathName(defFS1, ASAtomFromString("Cstring"), proofPath.c_str(), nullptr);
-        AVDoc proofDoc = AVDocOpenFromFile(proofASPath, defFS1, nullptr);
-        ASFileSysReleasePath(defFS1, proofASPath);
-        if (proofDoc == nullptr) {
-            ShowInfoDialog("Bundle gemaakt, maar proof PDF kon niet automatisch worden geopend.\n" + proofPath);
-            E_RTRN_VOID;
-        }
+ACCB1 void ACCB2 ExecuteReversePages(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("Reverse Pages");
+        if (!pdDoc) E_RTRN_VOID;
 
-        std::string sdkComposeError;
-        if (!TryRunExperimentalSdkComposer(pdDoc, plan, sdkOpsPath, imposedOutputPath, sdkComposeError)) {
-            ShowInfoDialog("Run bundle gereed; native SDK composer niet uitgevoerd:\n" + sdkComposeError);
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+        std::vector<std::uint32_t> order;
+        order.reserve((std::size_t)pageCount);
+        for (ASInt32 i = pageCount - 1; i >= 0; --i) order.push_back((std::uint32_t)i);
+        const auto plan = BuildReorderPlan("active-document", order, pageW, pageH);
+
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-reverse-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Reverse Pages failed:\n" + err); E_RTRN_VOID;
+        }
+        OpenPdfInAcrobat(outPath);
+        ShowInfoDialog("Pages reversed.\n" + outPath);
+    HANDLER
+        ShowInfoDialog("Error in Reverse Pages.");
+    END_HANDLER
+}
+
+// ── Insert Pages ───────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteInsertPages(void*) {
+    DURING
+        ShowInfoDialog("Insert Pages: coming in a future update.\n\nThis feature will insert blank pages at specified positions.");
+    HANDLER
+        ShowInfoDialog("Error in Insert Pages.");
+    END_HANDLER
+}
+
+// ── Trim & Shift ───────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteTrimShift(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("Trim & Shift");
+        if (!pdDoc) E_RTRN_VOID;
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+        // Build a simple booklet plan to apply creep to
+        const aimp::SheetSize sheetSize {pageW * 2.0, pageH};
+        aimp::BuildOptions opts {};
+        auto plan = aimp::BookletPlanner::Build(
+            "active-document", (std::uint32_t)pageCount, sheetSize, opts);
+
+        // Apply creep: 1.5pt per sheet, 8 sheets
+        aimp::TrimShiftConfig cfg {};
+        cfg.creepPerSheetPoints     = 1.5;
+        cfg.totalSheetsInSignature  = 8;
+        cfg.applyToLeftSlot         = true;
+        cfg.applyToRightSlot        = true;
+        cfg.direction               = aimp::CreepDirection::InwardFromSpine;
+        const auto result = aimp::ApplyCreepShiftToPlan(plan, cfg);
+
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-trimshift-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Trim & Shift failed:\n" + err); E_RTRN_VOID;
+        }
+        OpenPdfInAcrobat(outPath);
+        std::ostringstream msg;
+        msg << "Trim & Shift applied (" << result.sheetsAdjusted << " sheets adjusted).\n" << outPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Error in Trim & Shift.");
+    END_HANDLER
+}
+
+// ── Tile Pages ─────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteTilePages(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("Tile Pages");
+        if (!pdDoc) E_RTRN_VOID;
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+#ifdef MAC_PLATFORM
+        const TilePagesParams dlg = ShowTilePagesDialog();
+        if (dlg.cancelled) E_RTRN_VOID;
+        const std::uint32_t cols = dlg.cols, rows = dlg.rows;
+        const double overlap = dlg.overlapPoints;
+#else
+        constexpr std::uint32_t cols = 2, rows = 2;
+        const double overlap = 18.0;
+#endif
+        aimp::TilePagesConfig cfg {};
+        cfg.columns          = cols;
+        cfg.rows             = rows;
+        cfg.tileWidthPoints  = pageW / cols;
+        cfg.tileHeightPoints = pageH / rows;
+        cfg.overlapPoints    = overlap;
+        cfg.addAlignmentMarks = false;
+
+        const auto plan = aimp::BuildTilePlan("active-document",
+                                               (std::uint32_t)pageCount,
+                                               pageW, pageH, cfg);
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-tile-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Tile Pages failed:\n" + err); E_RTRN_VOID;
+        }
+        OpenPdfInAcrobat(outPath);
+        std::ostringstream msg;
+        msg << cols << "×" << rows << " tiles created.\n" << outPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Error in Tile Pages.");
+    END_HANDLER
+}
+
+// ── Page Sizes ─────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecutePageSizes(void*) {
+    DURING
+        ShowInfoDialog("Page Sizes: coming in a future update.\n\nThis feature adjusts the media/trim/bleed boxes of individual pages.");
+    HANDLER
+        ShowInfoDialog("Error in Page Sizes.");
+    END_HANDLER
+}
+
+// ── Page Tools ─────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecutePageTools(void*) {
+    DURING
+        ShowInfoDialog("Page Tools: coming in a future update.\n\nDuplicate, delete, move, and rotate individual pages.");
+    HANDLER
+        ShowInfoDialog("Error in Page Tools.");
+    END_HANDLER
+}
+
+// ── Creep ──────────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteCreep(void*) {
+    DURING
+        PDDoc pdDoc = GetActiveDocOrError("Creep");
+        if (!pdDoc) E_RTRN_VOID;
+
+        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
+        double pageW = 595.276, pageH = 841.890;
+        GetFirstPageDimensions(pdDoc, pageW, pageH);
+
+#ifdef MAC_PLATFORM
+        const CreepParams dlg = ShowCreepDialog();
+        if (dlg.cancelled) E_RTRN_VOID;
+        const double creepPt = dlg.creepPerSheet;
+        const std::uint32_t sheetsInSig = dlg.sheetsInSig;
+#else
+        const double creepPt = 1.5;
+        const std::uint32_t sheetsInSig = 8;
+#endif
+        const aimp::SheetSize sheetSize {pageW * 2.0, pageH};
+        aimp::BuildOptions opts {};
+        auto plan = aimp::BookletPlanner::Build(
+            "active-document", (std::uint32_t)pageCount, sheetSize, opts);
+
+        aimp::TrimShiftConfig cfg {};
+        cfg.creepPerSheetPoints    = creepPt;
+        cfg.totalSheetsInSignature = sheetsInSig;
+        cfg.applyToLeftSlot        = true;
+        cfg.applyToRightSlot       = true;
+        const auto result = aimp::ApplyCreepShiftToPlan(plan, cfg);
+
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+        const auto outPath = (tmp / ("imposr-creep-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!NativeComposePlan(pdDoc, plan, outPath, err)) {
+            ShowInfoDialog("Creep failed:\n" + err); E_RTRN_VOID;
+        }
+        OpenPdfInAcrobat(outPath);
+        std::ostringstream msg;
+        msg << "Creep applied (" << result.sheetsAdjusted << " sheets, max "
+            << result.maxCreepApplied << "pt).\n" << outPath;
+        ShowInfoDialog(msg.str());
+    HANDLER
+        ShowInfoDialog("Error in Creep.");
+    END_HANDLER
+}
+
+// ── Sample Document ────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteSampleDocument(void*) {
+    DURING
+        std::error_code fse;
+        const auto tmp = std::filesystem::temp_directory_path(fse);
+        if (fse) { ShowInfoDialog("Cannot determine temp dir."); E_RTRN_VOID; }
+
+        aimp::SampleDocumentOptions opts {};
+        opts.pageCount      = 16;
+        opts.pageWidthPoints  = 595.276;
+        opts.pageHeightPoints = 841.890;
+        opts.numberFromOne    = true;
+        opts.drawBorder       = true;
+        opts.drawDiagonals    = true;
+
+        const auto outPath = (tmp / ("imposr-sample-" + BuildUtcTimestamp() + ".pdf")).string();
+        std::string err;
+        if (!aimp::CreateSampleDocument(opts, outPath, err)) {
+            ShowInfoDialog("Sample Document failed:\n" + err); E_RTRN_VOID;
+        }
+        OpenPdfInAcrobat(outPath);
+        ShowInfoDialog("Sample document created (16 pages, A4).\n" + outPath);
+    HANDLER
+        ShowInfoDialog("Error creating Sample Document.");
+    END_HANDLER
+}
+
+// ── Monitor ────────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteMonitor(void*) {
+    DURING
+        AVDoc avDoc = AVAppGetActiveDoc();
+        std::ostringstream msg;
+        msg << "Imposition Monitor\n\n";
+        if (!avDoc) {
+            msg << "No document open.";
         } else {
-            const AVDoc imposedDoc = OpenPdfInAcrobat(imposedOutputPath);
-            if (imposedDoc == nullptr) {
-                ShowInfoDialog("Native output gemaakt, maar kon imposed-output niet automatisch openen:\n" + imposedOutputPath);
-            }
+            PDDoc pdDoc = AVDocGetPDDoc(avDoc);
+            const ASInt32 pageCount = pdDoc ? PDDocGetNumPages(pdDoc) : 0;
+            msg << "Active document: " << pageCount << " pages\n";
+            double pageW = 0, pageH = 0;
+            if (pdDoc) GetFirstPageDimensions(pdDoc, pageW, pageH);
+            msg << "First page: " << pageW << " × " << pageH << " pt\n";
         }
-
-        ShowInfoDialog("Preset-run bundle klaar (" + modeLabel + "):\n" + base.string());
-    HANDLER
-        ShowInfoDialog("Er trad een fout op bij preset-run.");
-    END_HANDLER
-}
-
-ACCB1 void ACCB2 ExecutePresetQuickConfigure(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-
-        const bool currentlyTwoUp = (preset.columns == 2 && preset.rows == 1);
-        if (currentlyTwoUp) {
-            preset.columns = 2;
-            preset.rows = 2;
-            preset.outputStem = "acrobat-imposition-nup2x2";
+        // Show last action
+        std::ifstream last(GetLastActionPath());
+        if (last) {
+            std::ostringstream buf; buf << last.rdbuf();
+            msg << "\nLast action:\n" << buf.str();
         } else {
-            preset.columns = 2;
-            preset.rows = 1;
-            preset.outputStem = "acrobat-imposition-two-up";
+            msg << "\nNo remembered action.";
         }
-        preset.pdfOptions.failOnValidationIssues = true;
-        preset.pdfOptions.failOnPreflightErrors = true;
-
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon quick config niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-
-        std::ostringstream message;
-        message << "Quick config toegepast.\n";
-        message << "Mode: " << (currentlyTwoUp ? "n-up 2x2" : "two-up") << '\n';
-        message << "Output stem: " << preset.outputStem << '\n';
-        message << "Preset: " << presetPath;
-        ShowInfoDialog(message.str());
+        ShowInfoDialog(msg.str());
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij quick config.");
+        ShowInfoDialog("Error in Monitor.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelCycleLayout(void* clientData) {
+// ── Stick On: Text & Numbers ───────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteStickOnText(void*) {
     DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-
-        if (preset.columns == 2 && preset.rows == 1) {
-            preset.columns = 2;
-            preset.rows = 2;
-            preset.outputStem = "acrobat-imposition-nup2x2";
-        } else if (preset.columns == 2 && preset.rows == 2) {
-            preset.columns = 1;
-            preset.rows = 1;
-            preset.outputStem = "acrobat-imposition-one-up";
-        } else {
-            preset.columns = 2;
-            preset.rows = 1;
-            preset.outputStem = "acrobat-imposition-two-up";
-        }
-
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon panel layout niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        std::ostringstream message;
-        message << "Panel layout aangepast.\n";
-        message << "Kolommen x rijen: " << preset.columns << "x" << preset.rows << '\n';
-        message << "Output stem: " << preset.outputStem << '\n';
-        message << "Preset: " << presetPath;
-        ShowInfoDialog(message.str());
+        ShowInfoDialog("Stick On: Text & Numbers — coming in a future update.\n\nAdd page numbers, Bates numbers, or custom text overlays to imposed sheets.");
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel layout wissel.");
+        ShowInfoDialog("Error in Stick On: Text & Numbers.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelTogglePrepress(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        const bool enabled = !(preset.pdfOptions.drawTrimMarks && preset.pdfOptions.drawBleedBox);
-        preset.pdfOptions.drawTrimMarks = enabled;
-        preset.pdfOptions.drawBleedBox = enabled;
-        preset.pdfOptions.bleedPoints = enabled ? 6.0 : 0.0;
+// ── Stick On: PDF Pages ────────────────────────────────────────────────────────
 
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon panel prepress toggle niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog(std::string("Panel prepress: ") + (enabled ? "AAN (trim+bleed)." : "UIT (trim+bleed)."));
+ACCB1 void ACCB2 ExecuteStickOnPdf(void*) {
+    DURING
+        ShowInfoDialog("Stick On: PDF Pages — coming in a future update.\n\nPlace a PDF page as an overlay on imposed sheets.");
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel prepress toggle.");
+        ShowInfoDialog("Error in Stick On: PDF Pages.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelSetOutputTemp(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) {
-            ShowInfoDialog("Kan temp map niet bepalen.");
-            E_RTRN_VOID;
-        }
-        preset.outputDirectory = tempDir.string();
-        if (preset.outputStem.empty()) {
-            preset.outputStem = "acrobat-imposition-run";
-        }
+// ── Stick On: Masking Tape ─────────────────────────────────────────────────────
 
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon panel output-pad niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog("Panel output locatie gezet op temp map:\n" + preset.outputDirectory);
+ACCB1 void ACCB2 ExecuteStickOnMasking(void*) {
+    DURING
+        ShowInfoDialog("Stick On: Masking Tape — coming in a future update.\n\nCover areas of the output sheet.");
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel output-pad instelling.");
+        ShowInfoDialog("Error in Stick On: Masking Tape.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelShowState(void* clientData) {
+// ── Peel Off: Text & Numbers ───────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecutePeelOffText(void*) {
     DURING
-        const std::string path = GetPanelStatePath();
+        ShowInfoDialog("Peel Off: Text & Numbers — coming in a future update.\n\nRemove previously applied text/number overlays.");
+    HANDLER
+        ShowInfoDialog("Error in Peel Off: Text & Numbers.");
+    END_HANDLER
+}
+
+// ── Peel Off: Masking Tape ─────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecutePeelOffMasking(void*) {
+    DURING
+        ShowInfoDialog("Peel Off: Masking Tape — coming in a future update.");
+    HANDLER
+        ShowInfoDialog("Error in Peel Off: Masking Tape.");
+    END_HANDLER
+}
+
+// ── Registration Marks ─────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteRegistrationMarks(void*) {
+    DURING
+        ShowInfoDialog("Registration Marks — coming in a future update.\n\nAdd crop marks, registration marks, and color bars to output sheets.");
+    HANDLER
+        ShowInfoDialog("Error in Registration Marks.");
+    END_HANDLER
+}
+
+// ── Sequences ─────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteSequences(void*) {
+    DURING
+        ShowInfoDialog("Sequences Manager — coming in a future update.\n\nRecord, save, and replay imposition sequences.\n\nUse 'Remember last' and 'Playback' for quick replay.");
+    HANDLER
+        ShowInfoDialog("Error in Sequences.");
+    END_HANDLER
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecutePlayback(void*) {
+    DURING
+        const std::string lastPath = GetLastActionPath();
+        std::ifstream in(lastPath);
+        if (!in) {
+            ShowInfoDialog("No remembered action. Use 'Remember last' after an operation.");
+            E_RTRN_VOID;
+        }
+        std::ostringstream buf; buf << in.rdbuf();
+        const std::string json = buf.str();
+
+        // Parse action type from JSON: "action": "booklet"|"nup"|"steprepeat"|"shuffle"
+        const auto findVal = [&](const std::string& key) -> std::string {
+            const auto pos = json.find("\"" + key + "\":");
+            if (pos == std::string::npos) return {};
+            const auto vpos = json.find('"', pos + key.size() + 3);
+            if (vpos == std::string::npos) return {};
+            const auto vend = json.find('"', vpos + 1);
+            if (vend == std::string::npos) return {};
+            return json.substr(vpos + 1, vend - vpos - 1);
+        };
+        const std::string action = findVal("action");
+        if (action == "booklet")    { ExecuteBooklet(nullptr); }
+        else if (action == "nup")   { ExecuteNUpPages(nullptr); }
+        else if (action == "steprepeat") { ExecuteStepAndRepeat(nullptr); }
+        else if (action == "shuffle")    { ExecuteShufflePages(nullptr); }
+        else {
+            ShowInfoDialog("Last action: " + action + "\nNo playback defined for this action yet.");
+        }
+    HANDLER
+        ShowInfoDialog("Error in Playback.");
+    END_HANDLER
+}
+
+// ── Remember Last ─────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteRememberLast(void*) {
+    DURING
+        const std::string path = GetLastActionPath();
         std::ifstream in(path);
         if (!in) {
-            ShowInfoDialog("Nog geen panel-state snapshot gevonden.\nRun eerst Validate of Run bundle.");
+            ShowInfoDialog("No action to remember yet. Run an imposition first.");
             E_RTRN_VOID;
         }
-        std::ostringstream content;
-        content << in.rdbuf();
-        ShowInfoDialog("Panel-state snapshot:\n" + path + "\n\n" + content.str());
+        std::ostringstream buf; buf << in.rdbuf();
+        ShowInfoDialog("Remembered action saved:\n" + path + "\n\n" + buf.str());
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel-state tonen.");
+        ShowInfoDialog("Error in Remember Last.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelApplyState(void* clientData) {
+// ── Preferences ───────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecutePreferences(void*) {
     DURING
-        const std::string panelStatePath = GetPanelStatePath();
-        std::ifstream in(panelStatePath);
-        if (!in) {
-            ShowInfoDialog("Geen panel-state bestand gevonden.\nRun eerst Validate/Run of bewerk panel-state handmatig.");
-            E_RTRN_VOID;
-        }
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        const std::string json = buffer.str();
+#ifdef MAC_PLATFORM
+        @autoreleasepool {
+            const CGFloat W = 360, ROW = 26, GAP = 6, LBL = 180, TOP = 8;
+            NSView* acc = MakeAccessoryView(W, TOP + 4 * (ROW + GAP) + 10);
+            auto rowY = [&](int row) -> CGFloat { return TOP + (CGFloat)row * (ROW + GAP); };
 
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
+            [acc addSubview:MakeLabel(@"Default sheet size:", NSMakeRect(0, rowY(3), LBL, ROW))];
+            NSPopUpButton* sheetPopup = AddSheetSizePopup(acc, NSMakeRect(LBL, rowY(3), W-LBL, ROW));
 
-        aimp::PanelStateApplyResult applyResult {};
-        if (!aimp::ApplyPanelStateJsonToPreset(json, preset, applyResult)) {
-            ShowInfoDialog("Panel-state kon niet worden toegepast: JSON mist verplichte sheet/preset secties.");
-            E_RTRN_VOID;
-        }
+            NSButton* trimChk = MakeCheckbox(@"Draw trim marks by default", NO,
+                                              NSMakeRect(0, rowY(2), W, ROW));
+            [acc addSubview:trimChk];
 
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon panel-state niet toepassen op preset: " + error);
-            E_RTRN_VOID;
-        }
-        std::ostringstream msg;
-        msg << "Panel-state toegepast op preset:\n" << presetPath;
-        if (!applyResult.warnings.empty()) {
-            msg << "\n\nNormalisaties:";
-            for (const auto& warning : applyResult.warnings) {
-                msg << "\n- " << warning;
+            NSButton* bleedChk = MakeCheckbox(@"Draw bleed box by default", NO,
+                                               NSMakeRect(0, rowY(1), W, ROW));
+            [acc addSubview:bleedChk];
+
+            [acc addSubview:MakeLabel(@"Bleed (pt):", NSMakeRect(0, rowY(0), LBL, ROW))];
+            NSTextField* bleedFld = MakeTextField(@"3", NSMakeRect(LBL, rowY(0)+2, 60, ROW-4));
+            [acc addSubview:bleedFld];
+
+            NSAlert* alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"Preferences"];
+            [alert setInformativeText:@"Imposition plug-in preferences."];
+            [alert addButtonWithTitle:@"OK"];
+            [alert addButtonWithTitle:@"Cancel"];
+            [alert setAccessoryView:acc];
+            [alert layout];
+
+            if ([alert runModal] == NSAlertFirstButtonReturn) {
+                aimp::PlannerPreset preset {};
+                std::string err;
+                if (!aimp::LoadPreset(GetPresetPath(), preset, err)) BuildDefaultPreset(preset);
+                const auto [sw, sh] = SheetFromPopup(sheetPopup, 1190.551, 841.890);
+                if (sw > 0) { preset.sheetSize.widthPoints = sw; preset.sheetSize.heightPoints = sh; }
+                preset.pdfOptions.drawTrimMarks = ([trimChk state] == NSControlStateValueOn);
+                preset.pdfOptions.drawBleedBox  = ([bleedChk state] == NSControlStateValueOn);
+                preset.pdfOptions.bleedPoints   = [[bleedFld stringValue] doubleValue];
+                (void)aimp::SavePreset(preset, GetPresetPath(), err);
+                ShowInfoDialog("Preferences saved.");
             }
         }
-        ShowInfoDialog(msg.str());
+#else
+        ShowInfoDialog("Preferences: edit the preset file at:\n" + GetPresetPath());
+#endif
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel-state apply.");
+        ShowInfoDialog("Error in Preferences.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelToggleQualityGate(void* clientData) {
+// ── Customize Panel ────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteCustomizePanel(void*) {
     DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        const bool enabled = !(preset.pdfOptions.failOnValidationIssues && preset.pdfOptions.failOnPreflightErrors);
-        preset.pdfOptions.failOnValidationIssues = enabled;
-        preset.pdfOptions.failOnPreflightErrors = enabled;
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon quality gate toggle niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog(std::string("Panel quality gate: ") + (enabled ? "AAN." : "UIT."));
+        ShowInfoDialog("Customize Panel — coming in a future update.\n\nReorder and show/hide buttons in the Control Panel.");
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel quality gate toggle.");
+        ShowInfoDialog("Error in Customize Panel.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelSheetA4(void* clientData) {
+// ── Help / About ───────────────────────────────────────────────────────────────
+
+ACCB1 void ACCB2 ExecuteHelpAbout(void*) {
     DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        preset.sheetSize = {595.276, 841.89};
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon A4 sheet preset niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog("Panel sheet ingesteld op A4 portrait (595.276 x 841.89 pt).");
+        ShowInfoDialog(
+            "Imposr — PDF Imposition Plug-in\n"
+            "Version 0.1.0\n\n"
+            "Features:\n"
+            "  \xE2\x80\xA2 Booklet (saddle stitch)\n"
+            "  \xE2\x80\xA2 N-up pages\n"
+            "  \xE2\x80\xA2 Step & Repeat\n"
+            "  \xE2\x80\xA2 Join 2 pages\n"
+            "  \xE2\x80\xA2 Shuffle / Reverse pages\n"
+            "  \xE2\x80\xA2 Tile pages\n"
+            "  \xE2\x80\xA2 Creep / Trim & Shift\n"
+            "  \xE2\x80\xA2 Sample document\n\n"
+            "All output is created as a NEW PDF \xe2\x80\x94 original is never modified.\n\n"
+            "https://github.com/AchimPieters/Imposr"
+        );
     HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel sheet A4.");
+        ShowInfoDialog("Error in Help / About.");
     END_HANDLER
 }
 
-ACCB1 void ACCB2 ExecutePanelSheetA3(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        const std::string presetPath = GetPresetPath();
-        if (!aimp::LoadPreset(presetPath, preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        preset.sheetSize = {841.89, 1190.55};
-        if (!aimp::SavePreset(preset, presetPath, error)) {
-            ShowInfoDialog("Kon A3 sheet preset niet opslaan: " + error);
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog("Panel sheet ingesteld op A3 portrait (841.89 x 1190.55 pt).");
-    HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel sheet A3.");
-    END_HANDLER
+// ── Menu registration ──────────────────────────────────────────────────────────
+
+static AVMenuItem AddItem(AVMenu menu, const char* title, const char* name,
+                          AVExecuteProc* procSlot, ACCB1 void (ACCB2 *fn)(void*)) {
+    *procSlot = ASCallbackCreateProto(AVExecuteProc, fn);
+    AVMenuItem item = AVMenuItemNew(title, name, nullptr, true, NO_SHORTCUT, 0, nullptr, nullptr);
+    if (!item) return nullptr;
+    AVMenuItemSetExecuteProc(item, *procSlot, nullptr);
+    AVMenuAddMenuItem(menu, item, APPEND_MENUITEM);
+    return item;
 }
 
-ACCB1 void ACCB2 ExecutePanelExportDialogPackage(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        if (!aimp::LoadPreset(GetPresetPath(), preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        std::string panelStatePath;
-        SavePanelState("n-up",
-                       preset,
-                       0,
-                       0,
-                       0,
-                       "",
-                       "",
-                       "",
-                       panelStatePath);
-
-        std::filesystem::path statePath(panelStatePath);
-        std::filesystem::path dir = statePath.parent_path();
-        if (dir.empty()) {
-            dir = std::filesystem::current_path();
-        }
-        const auto schemaPath = (dir / "acrobat-imposition-panel-dialog-schema.json").string();
-        std::ofstream out(schemaPath);
-        if (!out) {
-            ShowInfoDialog("Kon panel dialog schema niet schrijven.");
-            E_RTRN_VOID;
-        }
-        out << BuildPanelDialogSchemaJson();
-        ShowInfoDialog("Panel dialog package geëxporteerd:\nState: " + panelStatePath + "\nSchema: " + schemaPath);
-    HANDLER
-        ShowInfoDialog("Er trad een fout op bij panel dialog export.");
-    END_HANDLER
+static void AddSeparator(AVMenu menu, const char* name) {
+    AVMenuItem sep = AVMenuItemNew("-", name, nullptr, true, NO_SHORTCUT, 0, nullptr, nullptr);
+    if (sep) AVMenuAddMenuItem(menu, sep, APPEND_MENUITEM);
 }
 
-ACCB1 void ACCB2 ExecutePanelOpenUnifiedDialog(void* clientData) {
-    DURING
-        aimp::PlannerPreset preset {};
-        std::string error;
-        if (!aimp::LoadPreset(GetPresetPath(), preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-        std::string panelStatePath;
-        SavePanelState("n-up",
-                       preset,
-                       0,
-                       0,
-                       0,
-                       "",
-                       "",
-                       "",
-                       panelStatePath);
-        std::filesystem::path statePath(panelStatePath);
-        std::filesystem::path dir = statePath.parent_path();
-        if (dir.empty()) {
-            dir = std::filesystem::current_path();
-        }
-        const auto schemaPath = (dir / "acrobat-imposition-panel-dialog-schema.json").string();
-        const auto htmlPath = (dir / "acrobat-imposition-panel-dialog.html").string();
-        const std::string schemaJson = BuildPanelDialogSchemaJson();
-        std::ifstream panelStateIn(panelStatePath);
-        if (!panelStateIn) {
-            ShowInfoDialog("Kon panel state JSON niet openen.");
-            E_RTRN_VOID;
-        }
-        std::stringstream panelStateBuffer;
-        panelStateBuffer << panelStateIn.rdbuf();
-        const std::string panelStateJson = panelStateBuffer.str();
-        {
-            std::ofstream schemaOut(schemaPath);
-            if (!schemaOut) {
-                ShowInfoDialog("Kon panel schema niet schrijven.");
-                E_RTRN_VOID;
-            }
-            schemaOut << schemaJson;
-        }
-        {
-            std::ofstream htmlOut(htmlPath);
-            if (!htmlOut) {
-                ShowInfoDialog("Kon panel dialog HTML niet schrijven.");
-                E_RTRN_VOID;
-            }
-            htmlOut << BuildPanelDialogHtml(panelStatePath, schemaPath, panelStateJson, schemaJson);
-        }
-        ASFileSys defFS3 = ASGetDefaultFileSys();
-        ASPathName htmlASPath = ASFileSysCreatePathName(defFS3, ASAtomFromString("Cstring"), htmlPath.c_str(), nullptr);
-        AVDoc dialogDoc = AVDocOpenFromFile(htmlASPath, defFS3, nullptr);
-        ASFileSysReleasePath(defFS3, htmlASPath);
-        if (dialogDoc == nullptr) {
-            ShowInfoDialog("Unified dialog package gegenereerd:\n" + htmlPath + "\n(Open dit bestand handmatig als Acrobat het niet automatisch opent.)");
-            E_RTRN_VOID;
-        }
-        ShowInfoDialog("Unified dialog geopend:\n" + htmlPath);
-    HANDLER
-        ShowInfoDialog("Er trad een fout op bij open unified dialog.");
-    END_HANDLER
+bool RegisterMenus() {
+    AVMenubar mb = AVAppGetMenubar();
+    if (!mb) return false;
+
+    gImpositionMenu = AVMenuNew(kMenuName, kExtensionName, nullptr);
+    if (!gImpositionMenu) return false;
+    AVMenubarAddMenu(mb, gImpositionMenu, APPEND_MENU);
+
+    // ── Control ──────────────────────────────────────────────────────────────
+    gMI_ControlPanel = AddItem(gImpositionMenu, kMI_ControlPanel,
+        "AIMP:ControlPanel", &gProc_ControlPanel, ExecuteControlPanel);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_Easy");
+
+    // ── Easy Imposition ───────────────────────────────────────────────────────
+    gMI_Booklet       = AddItem(gImpositionMenu, kMI_Booklet,    "AIMP:Booklet",    &gProc_Booklet,      ExecuteBooklet);
+    gMI_NUpPages      = AddItem(gImpositionMenu, kMI_NUpPages,   "AIMP:NUpPages",   &gProc_NUpPages,     ExecuteNUpPages);
+    gMI_StepRepeat    = AddItem(gImpositionMenu, kMI_StepRepeat, "AIMP:StepRepeat", &gProc_StepRepeat,   ExecuteStepAndRepeat);
+    gMI_Join2Pages    = AddItem(gImpositionMenu, kMI_Join2Pages, "AIMP:Join2Pages", &gProc_Join2Pages,   ExecuteJoin2Pages);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_PageMgmt");
+
+    // ── Page Management ───────────────────────────────────────────────────────
+    gMI_ShufflePages  = AddItem(gImpositionMenu, kMI_ShufflePages,  "AIMP:ShufflePages",   &gProc_ShufflePages,  ExecuteShufflePages);
+    gMI_ShuffleEvenOdd= AddItem(gImpositionMenu, kMI_ShuffleEvenOdd,"AIMP:ShuffleEvenOdd", &gProc_ShuffleEvenOdd,ExecuteShuffleEvenOdd);
+    gMI_ReversePages  = AddItem(gImpositionMenu, kMI_ReversePages,  "AIMP:ReversePages",   &gProc_ReversePages,  ExecuteReversePages);
+    gMI_InsertPages   = AddItem(gImpositionMenu, kMI_InsertPages,   "AIMP:InsertPages",    &gProc_InsertPages,   ExecuteInsertPages);
+    gMI_TrimShift     = AddItem(gImpositionMenu, kMI_TrimShift,     "AIMP:TrimShift",      &gProc_TrimShift,     ExecuteTrimShift);
+    gMI_TilePages     = AddItem(gImpositionMenu, kMI_TilePages,     "AIMP:TilePages",      &gProc_TilePages,     ExecuteTilePages);
+    gMI_PageSizes     = AddItem(gImpositionMenu, kMI_PageSizes,     "AIMP:PageSizes",      &gProc_PageSizes,     ExecutePageSizes);
+    gMI_PageTools     = AddItem(gImpositionMenu, kMI_PageTools,     "AIMP:PageTools",      &gProc_PageTools,     ExecutePageTools);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_Advanced");
+
+    // ── Advanced ─────────────────────────────────────────────────────────────
+    gMI_Creep          = AddItem(gImpositionMenu, kMI_Creep,         "AIMP:Creep",         &gProc_Creep,         ExecuteCreep);
+    gMI_SampleDocument = AddItem(gImpositionMenu, kMI_SampleDocument,"AIMP:SampleDocument",&gProc_SampleDocument,ExecuteSampleDocument);
+    gMI_Monitor        = AddItem(gImpositionMenu, kMI_Monitor,       "AIMP:Monitor",       &gProc_Monitor,       ExecuteMonitor);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_StickOn");
+
+    // ── Stick On ─────────────────────────────────────────────────────────────
+    gMI_StickText    = AddItem(gImpositionMenu, kMI_StickText,   "AIMP:StickText",    &gProc_StickText,    ExecuteStickOnText);
+    gMI_StickPdf     = AddItem(gImpositionMenu, kMI_StickPdf,    "AIMP:StickPdf",     &gProc_StickPdf,     ExecuteStickOnPdf);
+    gMI_StickMasking = AddItem(gImpositionMenu, kMI_StickMasking,"AIMP:StickMasking", &gProc_StickMasking, ExecuteStickOnMasking);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_PeelOff");
+
+    // ── Peel Off ──────────────────────────────────────────────────────────────
+    gMI_PeelText    = AddItem(gImpositionMenu, kMI_PeelText,    "AIMP:PeelText",    &gProc_PeelText,    ExecutePeelOffText);
+    gMI_PeelMasking = AddItem(gImpositionMenu, kMI_PeelMasking, "AIMP:PeelMasking", &gProc_PeelMasking, ExecutePeelOffMasking);
+    gMI_RegMarks    = AddItem(gImpositionMenu, kMI_RegMarks,    "AIMP:RegMarks",    &gProc_RegMarks,    ExecuteRegistrationMarks);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_Automation");
+
+    // ── Automation ────────────────────────────────────────────────────────────
+    gMI_Sequences    = AddItem(gImpositionMenu, kMI_Sequences,    "AIMP:Sequences",    &gProc_Sequences,    ExecuteSequences);
+    gMI_Playback     = AddItem(gImpositionMenu, kMI_Playback,     "AIMP:Playback",     &gProc_Playback,     ExecutePlayback);
+    gMI_RememberLast = AddItem(gImpositionMenu, kMI_RememberLast, "AIMP:RememberLast", &gProc_RememberLast, ExecuteRememberLast);
+
+    AddSeparator(gImpositionMenu, "AIMP:Sep_Settings");
+
+    // ── Settings ─────────────────────────────────────────────────────────────
+    gMI_Preferences    = AddItem(gImpositionMenu, kMI_Preferences,    "AIMP:Preferences",   &gProc_Preferences,   ExecutePreferences);
+    gMI_CustomizePanel = AddItem(gImpositionMenu, kMI_CustomizePanel, "AIMP:CustomizePanel",&gProc_CustomizePanel,ExecuteCustomizePanel);
+    gMI_HelpAbout      = AddItem(gImpositionMenu, kMI_HelpAbout,      "AIMP:HelpAbout",     &gProc_HelpAbout,     ExecuteHelpAbout);
+
+    return true;
 }
 
-ACCB1 void ACCB2 ExecutePresetValidate(void* clientData) {
-    DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RTRN_VOID;
-        }
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
+// ── PluginUnload ──────────────────────────────────────────────────────────────
 
-        aimp::PlannerPreset preset {};
-        std::string error;
-        if (!aimp::LoadPreset(GetPresetPath(), preset, error)) {
-            BuildDefaultPreset(preset);
-        }
-
-        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        aimp::ImpositionPlan plan {};
-        std::string modeLabel;
-        if (!BuildPlanFromPreset(preset, static_cast<std::uint32_t>(pageCount), plan, modeLabel)) {
-            ShowInfoDialog("Kon geen plan opbouwen uit preset.");
-            E_RTRN_VOID;
-        }
-
-        const auto validationIssues = aimp::ValidatePlan(plan);
-        const auto preflightIssues = aimp::ValidatePrepressReadiness(plan, preset.pdfOptions);
-        std::size_t preflightErrorCount = 0;
-        for (const auto& issue : preflightIssues) {
-            if (issue.isError) {
-                ++preflightErrorCount;
-            }
-        }
-        std::ostringstream message;
-        message << "Validatie voor mode: " << modeLabel << '\n';
-        message << "Plan issues: " << validationIssues.size() << '\n';
-        message << "Preflight issues: " << preflightIssues.size()
-                << " (" << preflightErrorCount << " errors)\n";
-        if (validationIssues.empty() && preflightErrorCount == 0) {
-            message << "\nStatus: READY";
-        } else {
-            message << "\nStatus: BLOCKED";
-        }
-        std::string statePath;
-        if (SavePanelState(modeLabel,
-                           preset,
-                           validationIssues.size(),
-                           preflightIssues.size(),
-                           preflightErrorCount,
-                           "",
-                           "",
-                           "",
-                           statePath)) {
-            message << "\nPanel-state: " << statePath;
-        }
-        ShowInfoDialog(message.str());
-    HANDLER
-        ShowInfoDialog("Er trad een fout op bij preset-validatie.");
-    END_HANDLER
-}
-
-ACCB1 void ACCB2 ExecuteTwoUpReportExport(void* clientData) {
-    DURING
-        AVDoc activeDoc = AVAppGetActiveDoc();
-        if (activeDoc == nullptr) {
-            ShowInfoDialog("Open eerst een PDF in Acrobat.");
-            E_RTRN_VOID;
-        }
-
-        PDDoc pdDoc = AVDocGetPDDoc(activeDoc);
-        if (pdDoc == nullptr) {
-            ShowInfoDialog("Geen geldig PDDoc beschikbaar.");
-            E_RTRN_VOID;
-        }
-
-        const ASInt32 pageCount = PDDocGetNumPages(pdDoc);
-        const aimp::SheetSize outputSheet {1190.55, 841.89};
-        const auto plan = aimp::TwoUpPlanner::Build("active-document", static_cast<std::uint32_t>(pageCount), outputSheet);
-
-        std::error_code fsError;
-        const auto tempDir = std::filesystem::temp_directory_path(fsError);
-        if (fsError) {
-            ShowInfoDialog("Kan temp map niet bepalen voor report PDF.");
-            E_RTRN_VOID;
-        }
-        const auto reportPath = (tempDir / "acrobat-imposition-two-up-report.pdf").string();
-        std::string error;
-        if (!aimp::ComposePlanPdf(plan, reportPath, error)) {
-            ShowInfoDialog("Kon geen report PDF maken: " + error);
-            E_RTRN_VOID;
-        }
-
-        ShowInfoDialog("2-Up report PDF opgeslagen:\n" + reportPath);
-    HANDLER
-        ShowInfoDialog("Er trad een fout op tijdens report export.");
-    END_HANDLER
+void UnloadMenus() {
+    AVMenuItem* items[] = {
+        &gMI_ControlPanel, &gMI_Booklet, &gMI_NUpPages, &gMI_StepRepeat, &gMI_Join2Pages,
+        &gMI_ShufflePages, &gMI_ShuffleEvenOdd, &gMI_ReversePages, &gMI_InsertPages,
+        &gMI_TrimShift, &gMI_TilePages, &gMI_PageSizes, &gMI_PageTools,
+        &gMI_Creep, &gMI_SampleDocument, &gMI_Monitor,
+        &gMI_StickText, &gMI_StickPdf, &gMI_StickMasking,
+        &gMI_PeelText, &gMI_PeelMasking, &gMI_RegMarks,
+        &gMI_Sequences, &gMI_Playback, &gMI_RememberLast,
+        &gMI_Preferences, &gMI_CustomizePanel, &gMI_HelpAbout,
+    };
+    for (auto* slot : items) {
+        if (*slot) { AVMenuItemRemove(*slot); *slot = nullptr; }
+    }
+    if (gImpositionMenu) { AVMenuRelease(gImpositionMenu); gImpositionMenu = nullptr; }
 }
 
 } // namespace
 
-extern "C" ACCB1 ASBool ACCB2 PluginExportHFTs(void) {
-    return true;
-}
+// ── Plugin entrypoints ─────────────────────────────────────────────────────────
 
-extern "C" ACCB1 ASBool ACCB2 PluginImportReplaceAndRegister(void) {
-    return true;
-}
+extern "C" ACCB1 ASBool ACCB2 PluginExportHFTs(void) { return true; }
+
+extern "C" ACCB1 ASBool ACCB2 PluginImportReplaceAndRegister(void) { return true; }
 
 extern "C" ACCB1 ASBool ACCB2 PluginInit(void) {
     return RegisterMenus() ? true : false;
 }
 
 extern "C" ACCB1 ASBool ACCB2 PluginUnload(void) {
-    if (gStepAndRepeatMenuItem != nullptr) {
-        AVMenuItemRemove(gStepAndRepeatMenuItem);
-        gStepAndRepeatMenuItem = nullptr;
-    }
-    if (gNUpPagesMenuItem != nullptr) {
-        AVMenuItemRemove(gNUpPagesMenuItem);
-        gNUpPagesMenuItem = nullptr;
-    }
-    if (gCreateBookletMenuItem != nullptr) {
-        AVMenuItemRemove(gCreateBookletMenuItem);
-        gCreateBookletMenuItem = nullptr;
-    }
-    if (gPluginPanelOpenUnifiedDialogMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelOpenUnifiedDialogMenuItem);
-        gPluginPanelOpenUnifiedDialogMenuItem = nullptr;
-    }
-    if (gPluginPanelExportDialogPackageMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelExportDialogPackageMenuItem);
-        gPluginPanelExportDialogPackageMenuItem = nullptr;
-    }
-    if (gPluginPanelSheetA3MenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelSheetA3MenuItem);
-        gPluginPanelSheetA3MenuItem = nullptr;
-    }
-    if (gPluginPanelSheetA4MenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelSheetA4MenuItem);
-        gPluginPanelSheetA4MenuItem = nullptr;
-    }
-    if (gPluginPanelToggleQualityGateMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelToggleQualityGateMenuItem);
-        gPluginPanelToggleQualityGateMenuItem = nullptr;
-    }
-    if (gPluginPanelApplyStateMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelApplyStateMenuItem);
-        gPluginPanelApplyStateMenuItem = nullptr;
-    }
-    if (gPluginPanelShowStateMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelShowStateMenuItem);
-        gPluginPanelShowStateMenuItem = nullptr;
-    }
-    if (gPluginPanelSetOutputTempMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelSetOutputTempMenuItem);
-        gPluginPanelSetOutputTempMenuItem = nullptr;
-    }
-    if (gPluginPanelTogglePrepressMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelTogglePrepressMenuItem);
-        gPluginPanelTogglePrepressMenuItem = nullptr;
-    }
-    if (gPluginPanelCycleLayoutMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPanelCycleLayoutMenuItem);
-        gPluginPanelCycleLayoutMenuItem = nullptr;
-    }
-    if (gPluginPresetQuickConfigMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPresetQuickConfigMenuItem);
-        gPluginPresetQuickConfigMenuItem = nullptr;
-    }
-    if (gPluginPresetValidateMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPresetValidateMenuItem);
-        gPluginPresetValidateMenuItem = nullptr;
-    }
-    if (gPluginPresetRunMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPresetRunMenuItem);
-        gPluginPresetRunMenuItem = nullptr;
-    }
-    if (gPluginPresetPreviewMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPresetPreviewMenuItem);
-        gPluginPresetPreviewMenuItem = nullptr;
-    }
-    if (gPluginPresetSaveMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginPresetSaveMenuItem);
-        gPluginPresetSaveMenuItem = nullptr;
-    }
-    if (gPluginReportMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginReportMenuItem);
-        gPluginReportMenuItem = nullptr;
-    }
-    if (gPluginMenuItem != nullptr) {
-        AVMenuItemRemove(gPluginMenuItem);
-        gPluginMenuItem = nullptr;
-    }
-    if (gPluginSubMenu != nullptr) {
-        AVMenuRelease(gPluginSubMenu);
-        gPluginSubMenu = nullptr;
-    }
+#ifdef MAC_PLATFORM
+    if (gControlPanel) { [gControlPanel close]; gControlPanel = nil; }
+    if (gPanelDelegate) { gPanelDelegate = nil; }
+#endif
+    UnloadMenus();
     return true;
 }
 
@@ -2240,17 +2041,17 @@ extern "C" ACCB1 const char* ACCB2 GetExtensionName(void) {
     return kExtensionName;
 }
 
-extern "C" ACCB1 ASBool ACCB2 PIHandshake(ASUns32 handshakeVersion, void *handshakeData) {
+extern "C" ACCB1 ASBool ACCB2 PIHandshake(ASUns32 handshakeVersion, void* handshakeData) {
     if (handshakeVersion == HANDSHAKE_V0200) {
-        PIHandshakeData_V0200 *hsData = (PIHandshakeData_V0200 *)handshakeData;
-        hsData->extensionName = ASAtomFromString(GetExtensionName());
-        hsData->exportHFTsCallback =
+        PIHandshakeData_V0200* hsd = (PIHandshakeData_V0200*)handshakeData;
+        hsd->extensionName = ASAtomFromString(GetExtensionName());
+        hsd->exportHFTsCallback =
             (void*)ASCallbackCreateProto(PIExportHFTsProcType, &PluginExportHFTs);
-        hsData->importReplaceAndRegisterCallback =
+        hsd->importReplaceAndRegisterCallback =
             (void*)ASCallbackCreateProto(PIImportReplaceAndRegisterProcType, &PluginImportReplaceAndRegister);
-        hsData->initCallback =
+        hsd->initCallback =
             (void*)ASCallbackCreateProto(PIInitProcType, &PluginInit);
-        hsData->unloadCallback =
+        hsd->unloadCallback =
             (void*)ASCallbackCreateProto(PIUnloadProcType, &PluginUnload);
         return true;
     }

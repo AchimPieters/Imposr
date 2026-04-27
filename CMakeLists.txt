@@ -173,6 +173,7 @@ if(AIMP_BUILD_PLUGIN)
       "-framework CoreFoundation"
       "-framework Foundation"
       "-framework CoreServices"
+      "-framework AppKit"
     )
   endif()
 
